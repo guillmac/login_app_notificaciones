@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
 
 class ReservationService {
-  static const String baseUrl = 'https://tu-dominio.com/api/';
+  static const String baseUrl = 'https://clubfrance.org.mx/api/reservar_lugar.php';
   
   // Logger simplificado
   static final Logger _logger = Logger();
