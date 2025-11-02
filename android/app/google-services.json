@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "485433870761",
+    "project_id": "club-france",
+    "storage_bucket": "club-france.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:485433870761:android:34daefa9c15a9230bc9cb8",
+        "android_client_info": {
+          "package_name": "mx.org.clubfrance.login_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-vbifuHSNNf-8FIvH9gOS3H0gzRX6r5s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

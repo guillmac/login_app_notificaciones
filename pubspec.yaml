@@ -1,0 +1,99 @@
+name: login_app
+description: "App de login para Club France"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.8.1 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Dependencias principales existentes
+  intl: ^0.20.2
+  logger: ^2.6.2
+  url_launcher: ^6.1.11
+  google_maps_flutter: ^2.3.1
+
+  # Carousel de imágenes
+  carousel_slider: ^5.0.0
+
+  # Selección de imágenes - ACTUALIZADO
+  image_picker: ^1.1.2
+
+  # Almacenamiento local para sesión y datos
+  shared_preferences: ^2.2.2
+
+  # Iconos de Cupertino
+  cupertino_icons: ^1.0.8
+
+  # Peticiones HTTP al backend
+  http: ^1.1.0
+
+  # Logging estructurado en producción
+  logging: ^1.2.0
+
+  # Geolocalización
+  geolocator: ^14.0.2
+
+  # Biometría (huella o rostro) - ACTUALIZADO
+  local_auth: ^3.0.0
+
+  # Almacenamiento seguro para credenciales biométricas
+  flutter_secure_storage: ^9.0.0
+
+  # Ubicación en background
+  android_alarm_manager_plus: ^5.0.0
+  workmanager: ^0.9.0+3
+
+  # Manejo de permisos - ACTUALIZADO
+  permission_handler: ^12.0.1
+
+  # 🔹 FIREBASE CORE - ACTUALIZADO
+  firebase_core: ^4.2.0
+  
+  # 🔹 NOTIFICACIONES PUSH - ACTUALIZADO
+  firebase_messaging: ^16.0.3
+  
+  # 🔹 NOTIFICACIONES LOCALES
+  flutter_local_notifications: ^19.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+  # Para generar íconos de la app
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+  # 📂 Assets
+  assets:
+    - assets/images/
+    - assets/images/android-chrome-512x512.png
+    - assets/images/logo.png
+    - assets/images/logo_app.png
+
+  # 🔤 Fonts
+  fonts:
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/Montserrat-Regular.ttf
+        - asset: assets/fonts/Montserrat-Bold.ttf
+          weight: 700
+
+# 🔹 Configuración con tamaño reducido al 80%
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo_app.png"
+  min_sdk_android: 21
+  adaptive_icon_foreground: "assets/images/logo_app.png"
+  adaptive_icon_background: "#FFFFFF"
+  ios_precomposed: true
+  image_size_android: 80%
+  image_size_ios: 80%
