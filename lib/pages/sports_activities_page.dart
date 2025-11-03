@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../models/sport_activity.dart';
@@ -18,7 +17,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   late Future<List<SportActivity>> _futureDeportivas;
   List<SportActivity> _actividadesInfantiles = [];
   List<SportActivity> _actividadesAdultos = [];
-  final Map<String, int?> _clasesMuestraActivas = {};
+  final Map<String, Map<String, dynamic>> _clasesMuestraActivas = {}; // Cambiado para almacenar más información
   final String _usuarioId = '1';
   List<Map<String, dynamic>> _integrantesFamilia = [];
   bool _loadingFamilia = true;
@@ -29,6 +28,8 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     _futureDeportivas = _loadActividadesDeportivas();
     _loadUserData();
   }
+
+  // ... (mantener todos los métodos de _loadUserData hasta _getColorRol igual)
 
   Future<void> _loadUserData() async {
     setState(() => _loadingFamilia = true);
@@ -233,6 +234,36 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     }
   }
 
+  // Método para extraer días únicos de la actividad
+  List<String> _extraerDiasDisponibles(SportActivity actividad) {
+    final List<String> todosDias = [];
+    
+    if (actividad.tieneDias && actividad.diasFormateados.isNotEmpty) {
+      final diasSeparados = actividad.diasFormateados.split(',').map((d) => d.trim()).toList();
+      todosDias.addAll(diasSeparados);
+    }
+    
+    return todosDias.where((dia) => dia.isNotEmpty).toSet().toList();
+  }
+
+  // Método para extraer horarios únicos de la actividad
+  List<String> _extraerHorariosDisponibles(SportActivity actividad) {
+    final List<String> todosHorarios = [];
+    
+    if (actividad.horarios.isNotEmpty) {
+      for (String horarioCompleto in actividad.horarios) {
+        if (horarioCompleto.contains(',')) {
+          final horariosSeparados = horarioCompleto.split(',').map((h) => h.trim()).toList();
+          todosHorarios.addAll(horariosSeparados);
+        } else {
+          todosHorarios.add(horarioCompleto.trim());
+        }
+      }
+    }
+    
+    return todosHorarios.where((horario) => horario.isNotEmpty).toSet().toList();
+  }
+
   Future<List<SportActivity>> _loadActividadesDeportivas() async {
     final actividades = await SportService.getActividadesDeportivas();
     
@@ -252,17 +283,28 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   void _handleClaseMuestra(SportActivity actividad) {
     final actividadId = actividad.id.toString();
     
-    if (_clasesMuestraActivas[actividadId] == null) {
+    if (!_clasesMuestraActivas.containsKey(actividadId)) {
       _mostrarFormularioClaseMuestra(actividad);
-    } else {
-      _confirmarClaseMuestra(actividad);
     }
+    // Eliminado el else - ya no hay segunda confirmación
   }
 
   void _mostrarFormularioClaseMuestra(SportActivity actividad) {
     String? integranteSeleccionado;
-    DateTime? fechaSeleccionada;
-    TimeOfDay? horaSeleccionada;
+    String? diaSeleccionado;
+    String? horarioSeleccionado;
+
+    // Extraer días y horarios disponibles
+    final diasDisponibles = _extraerDiasDisponibles(actividad);
+    final horariosDisponibles = _extraerHorariosDisponibles(actividad);
+
+    // Si solo hay un día/horario disponible, seleccionarlo automáticamente
+    if (diasDisponibles.length == 1) {
+      diaSeleccionado = diasDisponibles.first;
+    }
+    if (horariosDisponibles.length == 1) {
+      horarioSeleccionado = horariosDisponibles.first;
+    }
 
     showDialog(
       context: context,
@@ -273,7 +315,39 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Información de la actividad
+                  Card(
+                    elevation: 2,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Información de la actividad:',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildActivityInfoRow(Icons.sports, 'Actividad:', actividad.nombreActividad),
+                          _buildActivityInfoRow(Icons.person, 'Profesor:', actividad.nombreProfesor),
+                          _buildActivityInfoRow(Icons.place, 'Ubicación:', actividad.lugar),
+                          if (actividad.tieneDias)
+                            _buildActivityInfoRow(Icons.calendar_today, 'Días:', actividad.diasFormateados),
+                          if (actividad.horarios.isNotEmpty)
+                            _buildActivityInfoRow(Icons.access_time, 'Horarios:', actividad.horarios.join('\n')),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Selector de integrante
                   if (_loadingFamilia)
                     const Padding(
                       padding: EdgeInsets.all(16.0),
@@ -320,7 +394,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                           fontSize: 14,
                           color: Colors.black87,
                         ),
-                        initialValue: integranteSeleccionado, // CORREGIDO: value -> initialValue
+                        initialValue: integranteSeleccionado,
                         items: _integrantesFamilia.map<DropdownMenuItem<String>>((integrante) {
                           final numeroUsuario = integrante['numero_usuario'] as String;
                           final nombre = integrante['nombre'] as String;
@@ -376,54 +450,96 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                         },
                       ),
                     ),
+
                   const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        fechaSeleccionada == null
-                            ? 'Seleccionar fecha de clase muestra'
-                            : 'Fecha clase muestra: ${DateFormat('dd/MM/yyyy').format(fechaSeleccionada!)}',
-                        style: const TextStyle(fontSize: 14),
+
+                  // Selector de día (solo si hay días disponibles)
+                  if (diasDisponibles.isNotEmpty)
+                    Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 200,
+                        maxWidth: 400,
                       ),
-                      trailing: const Icon(Icons.calendar_today),
-                      onTap: () async {
-                        final fecha = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now(),
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(const Duration(days: 30)),
-                        );
-                        if (fecha != null) {
-                          setModalState(() => fechaSeleccionada = fecha);
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        horaSeleccionada == null
-                            ? 'Seleccionar horario de clase muestra'
-                            : 'Horario clase muestra: ${horaSeleccionada!.format(context)}',
-                        style: const TextStyle(fontSize: 14),
+                      child: DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Selecciona un día',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        ),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
+                        initialValue: diaSeleccionado,
+                        items: diasDisponibles.map<DropdownMenuItem<String>>((dia) {
+                          return DropdownMenuItem<String>(
+                            value: dia,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    dia,
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setModalState(() => diaSeleccionado = value);
+                        },
                       ),
-                      trailing: const Icon(Icons.access_time),
-                      onTap: () async {
-                        final hora = await showTimePicker(
-                          context: context,
-                          initialTime: TimeOfDay.now(),
-                        );
-                        if (hora != null) {
-                          setModalState(() => horaSeleccionada = hora);
-                        }
-                      },
                     ),
-                  ),
+
+                  if (diasDisponibles.isNotEmpty) const SizedBox(height: 16),
+
+                  // Selector de horario (solo si hay horarios disponibles)
+                  if (horariosDisponibles.isNotEmpty)
+                    Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 200,
+                        maxWidth: 400,
+                      ),
+                      child: DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Selecciona un horario',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        ),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
+                        initialValue: horarioSeleccionado,
+                        items: horariosDisponibles.map<DropdownMenuItem<String>>((horario) {
+                          return DropdownMenuItem<String>(
+                            value: horario,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.access_time, size: 16, color: Colors.green),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    horario,
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setModalState(() => horarioSeleccionado = value);
+                        },
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -433,16 +549,16 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 child: const Text('Cancelar'),
               ),
               ElevatedButton(
-                onPressed: integranteSeleccionado != null &&
-                        fechaSeleccionada != null &&
-                        horaSeleccionada != null
+                onPressed: (integranteSeleccionado != null && 
+                           (diasDisponibles.isEmpty || diaSeleccionado != null) &&
+                           (horariosDisponibles.isEmpty || horarioSeleccionado != null))
                     ? () {
                         Navigator.pop(context);
                         _asignarClaseMuestra(
                           actividad: actividad,
                           integrante: integranteSeleccionado!,
-                          fecha: fechaSeleccionada!,
-                          hora: horaSeleccionada!,
+                          diaSeleccionado: diaSeleccionado,
+                          horarioSeleccionado: horarioSeleccionado,
                         );
                       }
                     : null,
@@ -455,85 +571,35 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
-  void _asignarClaseMuestra({
-    required SportActivity actividad,
-    required String integrante,
-    required DateTime fecha,
-    required TimeOfDay hora,
-  }) {
-    final actividadId = actividad.id.toString();
-    
-    setState(() {
-      _clasesMuestraActivas[actividadId] = 1;
-    });
-
-    final integranteData = _integrantesFamilia.firstWhere(
-      (i) => i['numero_usuario'] == integrante,
-      orElse: () => {'nombre': integrante, 'rol': 'miembro'}
-    );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Clase muestra confirmada para ${integranteData['nombre']} ($integrante) el ${DateFormat('dd/MM/yyyy').format(fecha)} a las ${hora.format(context)} en ${actividad.lugar}.',
-        ),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
-  void _confirmarClaseMuestra(SportActivity actividad) {
-    final actividadId = actividad.id.toString();
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text(
-          "Confirmar Clase Muestra",
-          style: TextStyle(fontFamily: 'Montserrat', fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          "¿Desea confirmar la clase muestra para:\n\n"
-          "${actividad.nombreActividad}\n"
-          "Con el profesor: ${actividad.nombreProfesor}",
-          style: const TextStyle(fontFamily: 'Montserrat'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              "Cancelar",
-              style: TextStyle(fontFamily: 'Montserrat'),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    "Clase muestra confirmada: ${actividad.nombreActividad}",
-                    style: const TextStyle(fontFamily: 'Montserrat'),
+  Widget _buildActivityInfoRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: Colors.grey[600]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700],
+                    fontSize: 13,
                   ),
-                  backgroundColor: Colors.green,
                 ),
-              );
-              
-              setState(() {
-                _clasesMuestraActivas.remove(actividadId);
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color.fromRGBO(13, 71, 161, 1),
-            ),
-            child: const Text(
-              "Confirmar",
-              style: TextStyle(
-                fontFamily: 'Montserrat',
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -541,9 +607,87 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
+  void _asignarClaseMuestra({
+    required SportActivity actividad,
+    required String integrante,
+    required String? diaSeleccionado,
+    required String? horarioSeleccionado,
+  }) {
+    final actividadId = actividad.id.toString();
+    
+    // Almacenar toda la información de la clase muestra
+    setState(() {
+      _clasesMuestraActivas[actividadId] = {
+        'integrante': integrante,
+        'dia': diaSeleccionado,
+        'horario': horarioSeleccionado,
+        'fechaAsignacion': DateTime.now(),
+      };
+    });
+
+    final integranteData = _integrantesFamilia.firstWhere(
+      (i) => i['numero_usuario'] == integrante,
+      orElse: () => {'nombre': integrante, 'rol': 'miembro'}
+    );
+
+    // Construir mensaje con la información completa
+    String mensaje = '✅ Clase muestra confirmada\n\n'
+                    '👤 Para: ${integranteData['nombre']} ($integrante)\n'
+                    '📋 Actividad: ${actividad.nombreActividad}\n'
+                    '👨‍🏫 Profesor: ${actividad.nombreProfesor}\n'
+                    '📍 Ubicación: ${actividad.lugar}\n';
+
+    if (diaSeleccionado != null) {
+      mensaje += '📅 Día: $diaSeleccionado\n';
+    }
+
+    if (horarioSeleccionado != null) {
+      mensaje += '⏰ Horario: $horarioSeleccionado';
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          mensaje,
+          style: const TextStyle(fontSize: 14),
+        ),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 6),
+      ),
+    );
+  }
+
+  // Eliminado el método _confirmarClaseMuestra - ya no es necesario
+
   void _cancelarClaseMuestra(SportActivity actividad) async {
     final actividadId = actividad.id.toString();
     
+    // Mostrar diálogo de confirmación antes de cancelar
+    final confirmarCancelacion = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancelar clase muestra'),
+        content: Text(
+          '¿Estás seguro de que deseas cancelar la clase muestra de "${actividad.nombreActividad}"?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No, mantener'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Sí, cancelar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmarCancelacion != true) return;
+
     final resultado = await ReservationService.cancelarReserva(
       actividadId: actividadId,
       usuarioId: _usuarioId,
@@ -607,6 +751,8 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       ),
     );
   }
+
+  // ... (mantener todos los métodos de build restantes)
 
   Widget _buildContent() {
     return DefaultTabController(
@@ -682,6 +828,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   Widget _buildTarjetaActividad(SportActivity actividad, Color color) {
     final actividadId = actividad.id.toString();
     final tieneClaseMuestra = _clasesMuestraActivas.containsKey(actividadId);
+    final infoClaseMuestra = tieneClaseMuestra ? _clasesMuestraActivas[actividadId] : null;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -748,24 +895,42 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.green),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.school, color: Colors.green, size: 20),
-                    const SizedBox(width: 8),
-                    const Text(
-                      "Clase muestra programada",
-                      style: TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
+                    Row(
+                      children: [
+                        const Icon(Icons.school, color: Colors.green, size: 20),
+                        const SizedBox(width: 8),
+                        const Text(
+                          "Clase muestra programada",
+                          style: TextStyle(
+                            fontFamily: 'Montserrat',
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.cancel, color: Colors.red, size: 20),
+                          onPressed: () => _cancelarClaseMuestra(actividad),
+                          tooltip: "Cancelar clase muestra",
+                        ),
+                      ],
                     ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.cancel, color: Colors.red, size: 20),
-                      onPressed: () => _cancelarClaseMuestra(actividad),
-                      tooltip: "Cancelar clase muestra",
-                    ),
+                    if (infoClaseMuestra != null) ...[
+                      const SizedBox(height: 8),
+                      if (infoClaseMuestra['dia'] != null)
+                        Text(
+                          '📅 Día: ${infoClaseMuestra['dia']}',
+                          style: const TextStyle(fontSize: 12, color: Colors.green),
+                        ),
+                      if (infoClaseMuestra['horario'] != null)
+                        Text(
+                          '⏰ Horario: ${infoClaseMuestra['horario']}',
+                          style: const TextStyle(fontSize: 12, color: Colors.green),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -778,7 +943,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 onPressed: () => _handleClaseMuestra(actividad),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: tieneClaseMuestra 
-                      ? Colors.green
+                      ? Colors.grey // Cambiado a gris cuando ya está programada
                       : const Color.fromRGBO(13, 71, 161, 1),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
@@ -791,7 +956,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   size: 20,
                 ),
                 label: Text(
-                  tieneClaseMuestra ? "CONFIRMAR CLASE MUESTRA" : "CLASE MUESTRA",
+                  tieneClaseMuestra ? "CLASE MUESTRA PROGRAMADA" : "SOLICITAR CLASE MUESTRA", // Texto cambiado
                   style: const TextStyle(
                     fontFamily: 'Montserrat',
                     fontWeight: FontWeight.bold,
