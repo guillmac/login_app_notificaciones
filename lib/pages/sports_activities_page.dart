@@ -1,7 +1,11 @@
- import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../models/sport_activity.dart';
 import '../services/sport_service.dart';
 import '../services/reservation_service.dart';
+import '../utils/session_manager.dart';
 
 class SportsActivitiesPage extends StatefulWidget {
   const SportsActivitiesPage({super.key});
@@ -14,13 +18,219 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   late Future<List<SportActivity>> _futureDeportivas;
   List<SportActivity> _actividadesInfantiles = [];
   List<SportActivity> _actividadesAdultos = [];
-  final Map<String, int?> _reservasActivas = {};
+  final Map<String, int?> _clasesMuestraActivas = {};
   final String _usuarioId = '1';
+  List<Map<String, dynamic>> _integrantesFamilia = [];
+  bool _loadingFamilia = true;
 
   @override
   void initState() {
     super.initState();
     _futureDeportivas = _loadActividadesDeportivas();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    setState(() => _loadingFamilia = true);
+    
+    try {
+      final userData = await SessionManager.getCurrentUser();
+      if (userData != null) {
+        await _loadIntegrantesFamilia(userData['numero_usuario'] ?? '');
+      } else {
+        _setDefaultUserData();
+      }
+    } catch (e) {
+      _setDefaultUserData();
+    } finally {
+      setState(() => _loadingFamilia = false);
+    }
+  }
+
+  void _setDefaultUserData() {
+    setState(() {
+      _integrantesFamilia = [];
+    });
+  }
+
+  Future<void> _loadIntegrantesFamilia(String numeroUsuarioBase) async {
+    if (numeroUsuarioBase.isEmpty || numeroUsuarioBase == 'No disponible') {
+      setState(() {
+        _integrantesFamilia = [];
+      });
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse("https://clubfrance.org.mx/api/get_usuarios_relacionados.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"numero_usuario_base": numeroUsuarioBase}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['usuarios_relacionados'] != null) {
+          final List<dynamic> usuariosData = data['usuarios_relacionados'];
+          List<Map<String, dynamic>> integrantes = [];
+          
+          for (var usuario in usuariosData) {
+            if (usuario is String) {
+              integrantes.add({
+                'numero_usuario': usuario,
+                'nombre': _obtenerNombreDeUsuario(usuario),
+                'rol': _determinarRol(usuario),
+              });
+            } else if (usuario is Map) {
+              final usuarioMap = Map<String, dynamic>.from(usuario);
+              
+              String nombreCompleto = _obtenerNombreCompletoDeUsuario(usuarioMap);
+              
+              integrantes.add({
+                'numero_usuario': usuarioMap['numero_usuario']?.toString() ?? usuarioMap['id']?.toString() ?? 'N/A',
+                'nombre': nombreCompleto,
+                'rol': usuarioMap['rol']?.toString() ?? _determinarRol(usuarioMap['numero_usuario']?.toString() ?? ''),
+              });
+            }
+          }
+          
+          setState(() {
+            _integrantesFamilia = integrantes;
+          });
+        } else {
+          await _loadInfoUsuarioActual(numeroUsuarioBase);
+        }
+      } else {
+        await _loadInfoUsuarioActual(numeroUsuarioBase);
+      }
+    } catch (e) {
+      await _loadInfoUsuarioActual(numeroUsuarioBase);
+    }
+  }
+
+  String _obtenerNombreCompletoDeUsuario(Map<String, dynamic> usuario) {
+    String nombreCompleto = usuario['nombre_completo']?.toString() ?? 
+                           usuario['nombre']?.toString() ?? 
+                           usuario['name']?.toString() ?? 
+                           usuario['full_name']?.toString() ?? 
+                           '';
+
+    if (nombreCompleto.isEmpty) {
+      String nombre = usuario['nombre']?.toString() ?? 
+                     usuario['primer_nombre']?.toString() ?? 
+                     usuario['first_name']?.toString() ?? '';
+      
+      String apellidoPaterno = usuario['apellido_paterno']?.toString() ?? 
+                              usuario['apellido']?.toString() ?? 
+                              usuario['last_name']?.toString() ?? '';
+      
+      String apellidoMaterno = usuario['apellido_materno']?.toString() ?? 
+                              usuario['segundo_apellido']?.toString() ?? '';
+
+      if (nombre.isNotEmpty && apellidoPaterno.isNotEmpty) {
+        nombreCompleto = '$nombre $apellidoPaterno ${apellidoMaterno.isNotEmpty ? apellidoMaterno : ''}'.trim();
+      } else if (nombre.isNotEmpty) {
+        nombreCompleto = nombre;
+      }
+    }
+
+    if (nombreCompleto.isEmpty) {
+      final numeroUsuario = usuario['numero_usuario']?.toString() ?? '';
+      final rol = _determinarRol(numeroUsuario);
+      nombreCompleto = _obtenerNombrePorRol(rol);
+    }
+
+    return nombreCompleto;
+  }
+
+  String _obtenerNombrePorRol(String rol) {
+    switch (rol) {
+      case 'titular': return 'Titular';
+      case 'conyuge': return 'Cónyuge';
+      case 'hijo': return 'Hijo/a';
+      default: return 'Miembro Familiar';
+    }
+  }
+
+  Future<void> _loadInfoUsuarioActual(String numeroUsuario) async {
+    try {
+      final response = await http.post(
+        Uri.parse("https://clubfrance.org.mx/api/get_user_info.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"numero_usuario": numeroUsuario}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          final dataMap = Map<String, dynamic>.from(data);
+          
+          String nombreCompleto = _obtenerNombreCompletoDeUsuario(dataMap);
+          
+          setState(() {
+            _integrantesFamilia = [{
+              'numero_usuario': dataMap['numero_usuario']?.toString() ?? numeroUsuario,
+              'nombre': nombreCompleto,
+              'rol': 'titular',
+            }];
+          });
+        } else {
+          _setIntegrantePorDefecto(numeroUsuario);
+        }
+      } else {
+        _setIntegrantePorDefecto(numeroUsuario);
+      }
+    } catch (e) {
+      _setIntegrantePorDefecto(numeroUsuario);
+    }
+  }
+
+  void _setIntegrantePorDefecto(String numeroUsuario) {
+    setState(() {
+      _integrantesFamilia = [{
+        'numero_usuario': numeroUsuario,
+        'nombre': 'Usuario Principal',
+        'rol': 'titular',
+      }];
+    });
+  }
+
+  String _obtenerNombreDeUsuario(String numeroUsuario) {
+    final rol = _determinarRol(numeroUsuario);
+    return _obtenerNombrePorRol(rol);
+  }
+
+  String _determinarRol(String numeroUsuario) {
+    if (numeroUsuario.isEmpty) return 'titular';
+    if (!numeroUsuario.contains(RegExp(r'[A-Z]$'))) return 'titular';
+    
+    final sufijo = numeroUsuario.substring(numeroUsuario.length - 1);
+    switch (sufijo) {
+      case 'A': return 'conyuge';
+      case 'B': return 'hijo';
+      case 'C': return 'hijo';
+      case 'D': return 'hijo';
+      case 'E': return 'hijo';
+      default: return 'hijo';
+    }
+  }
+
+  String _getRolDisplay(String rol) {
+    switch (rol) {
+      case 'titular': return 'Titular';
+      case 'conyuge': return 'Cónyuge';
+      case 'hijo': return 'Hijo/a';
+      default: return 'Miembro';
+    }
+  }
+
+  Color _getColorRol(String rol) {
+    switch (rol) {
+      case 'titular': return const Color.fromRGBO(25, 118, 210, 1);
+      case 'conyuge': return Colors.purple;
+      case 'hijo': return Colors.green;
+      default: return Colors.grey;
+    }
   }
 
   Future<List<SportActivity>> _loadActividadesDeportivas() async {
@@ -35,250 +245,257 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   void _refreshData() {
     setState(() {
       _futureDeportivas = _loadActividadesDeportivas();
-      _reservasActivas.clear();
+      _clasesMuestraActivas.clear();
     });
   }
 
-  void _handleReserva(SportActivity actividad) {
+  void _handleClaseMuestra(SportActivity actividad) {
     final actividadId = actividad.id.toString();
     
-    if (_reservasActivas[actividadId] == null) {
-      _mostrarSeleccionLugares(actividad);
+    if (_clasesMuestraActivas[actividadId] == null) {
+      _mostrarFormularioClaseMuestra(actividad);
     } else {
-      _procesarPago(actividad);
+      _confirmarClaseMuestra(actividad);
     }
   }
 
-  void _mostrarSeleccionLugares(SportActivity actividad) {
-    final actividadId = actividad.id.toString();
-    
+  void _mostrarFormularioClaseMuestra(SportActivity actividad) {
+    String? integranteSeleccionado;
+    DateTime? fechaSeleccionada;
+    TimeOfDay? horaSeleccionada;
+
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setModalState) {
           return AlertDialog(
-            title: const Text(
-              "Seleccionar Lugar",
-              style: TextStyle(fontFamily: 'Montserrat', fontWeight: FontWeight.bold),
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: _buildSelectorLugares(actividad, setDialogState, context),
+            title: Text('Clase muestra - ${actividad.nombreActividad}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_loadingFamilia)
+                    const Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 8),
+                          Text(
+                            'Cargando integrantes...',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_integrantesFamilia.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          Icon(Icons.people_outline, size: 48, color: Colors.grey),
+                          SizedBox(height: 8),
+                          Text(
+                            'No se encontraron integrantes de la membresía',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 200,
+                        maxWidth: 400,
+                      ),
+                      child: DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Selecciona integrante de la membresía',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        ),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
+                        initialValue: integranteSeleccionado, // CORREGIDO: value -> initialValue
+                        items: _integrantesFamilia.map<DropdownMenuItem<String>>((integrante) {
+                          final numeroUsuario = integrante['numero_usuario'] as String;
+                          final nombre = integrante['nombre'] as String;
+                          final rol = integrante['rol'] as String;
+                          final rolDisplay = _getRolDisplay(rol);
+                          final colorRol = _getColorRol(rol);
+                          
+                          return DropdownMenuItem<String>(
+                            value: numeroUsuario,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      color: colorRol,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          nombre.isNotEmpty ? nombre : 'Nombre no disponible',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        Text(
+                                          '$numeroUsuario • $rolDisplay',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[600],
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setModalState(() => integranteSeleccionado = value);
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        fechaSeleccionada == null
+                            ? 'Seleccionar fecha de clase muestra'
+                            : 'Fecha clase muestra: ${DateFormat('dd/MM/yyyy').format(fechaSeleccionada!)}',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: () async {
+                        final fecha = await showDatePicker(
+                          context: context,
+                          initialDate: DateTime.now(),
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime.now().add(const Duration(days: 30)),
+                        );
+                        if (fecha != null) {
+                          setModalState(() => fechaSeleccionada = fecha);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        horaSeleccionada == null
+                            ? 'Seleccionar horario de clase muestra'
+                            : 'Horario clase muestra: ${horaSeleccionada!.format(context)}',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      trailing: const Icon(Icons.access_time),
+                      onTap: () async {
+                        final hora = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.now(),
+                        );
+                        if (hora != null) {
+                          setModalState(() => horaSeleccionada = hora);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  "Cancelar",
-                  style: TextStyle(fontFamily: 'Montserrat'),
-                ),
+                child: const Text('Cancelar'),
               ),
               ElevatedButton(
-                onPressed: _reservasActivas[actividadId] != null 
+                onPressed: integranteSeleccionado != null &&
+                        fechaSeleccionada != null &&
+                        horaSeleccionada != null
                     ? () {
                         Navigator.pop(context);
-                        _procesarPago(actividad);
+                        _asignarClaseMuestra(
+                          actividad: actividad,
+                          integrante: integranteSeleccionado!,
+                          fecha: fechaSeleccionada!,
+                          hora: horaSeleccionada!,
+                        );
                       }
                     : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color.fromRGBO(13, 71, 161, 1),
-                ),
-                child: const Text(
-                  "Continuar al Pago",
-                  style: TextStyle(
-                    fontFamily: 'Montserrat',
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                child: const Text('Confirmar clase muestra'),
               ),
             ],
           );
-        },
-      ),
-    );
-  }
-
-  Widget _buildSelectorLugares(SportActivity actividad, StateSetter setDialogState, BuildContext dialogContext) {
-    final actividadId = actividad.id.toString();
-    final lugarSeleccionado = _reservasActivas[actividadId];
-    
-    return FutureBuilder<List<int>>(
-      future: ReservationService.getLugaresOcupados(actividadId),
-      builder: (context, snapshot) {
-        final lugaresOcupados = snapshot.data ?? [];
-        
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Selecciona un lugar disponible (${actividad.nombreActividad})",
-              style: const TextStyle(
-                fontFamily: 'Montserrat',
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              "Lugares Disponibles:",
-              style: TextStyle(
-                fontFamily: 'Montserrat',
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 5,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 1.0,
-              ),
-              itemCount: 10,
-              itemBuilder: (context, index) {
-                final numeroLugar = index + 1;
-                final estaSeleccionado = lugarSeleccionado == numeroLugar;
-                final estaOcupado = lugaresOcupados.contains(numeroLugar);
-
-                return GestureDetector(
-                  onTap: !estaOcupado 
-                      ? () => _reservarLugar(
-                            actividadId: actividadId,
-                            numeroLugar: numeroLugar,
-                            setDialogState: setDialogState,
-                            dialogContext: dialogContext,
-                          )
-                      : null,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: estaOcupado 
-                          ? Colors.grey[300]
-                          : estaSeleccionado
-                              ? const Color.fromRGBO(13, 71, 161, 1)
-                              : Colors.blue[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: estaSeleccionado 
-                            ? const Color.fromRGBO(13, 71, 161, 1)
-                            : Colors.grey[300]!,
-                        width: estaSeleccionado ? 2 : 1,
-                      ),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '$numeroLugar',
-                            style: TextStyle(
-                              fontFamily: 'Montserrat',
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: estaOcupado 
-                                  ? Colors.grey[600]
-                                  : estaSeleccionado
-                                      ? Colors.white
-                                      : const Color.fromRGBO(13, 71, 161, 1),
-                            ),
-                          ),
-                          if (estaOcupado)
-                            const Icon(
-                              Icons.block,
-                              size: 12,
-                              color: Colors.red,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-            if (lugarSeleccionado != null)
-              Text(
-                "Lugar seleccionado: $lugarSeleccionado",
-                style: const TextStyle(
-                  fontFamily: 'Montserrat',
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Color.fromRGBO(13, 71, 161, 1),
-                ),
-              ),
-            if (snapshot.connectionState == ConnectionState.waiting)
-              const Padding(
-                padding: EdgeInsets.only(top: 8.0),
-                child: Center(
-                  child: CircularProgressIndicator(),
-                ),
-              ),
-          ],
-        );
+        });
       },
     );
   }
 
-  Future<void> _reservarLugar({
-    required String actividadId,
-    required int numeroLugar,
-    required StateSetter setDialogState,
-    required BuildContext dialogContext,
-  }) async {
-    setDialogState(() {
-      _reservasActivas[actividadId] = numeroLugar;
+  void _asignarClaseMuestra({
+    required SportActivity actividad,
+    required String integrante,
+    required DateTime fecha,
+    required TimeOfDay hora,
+  }) {
+    final actividadId = actividad.id.toString();
+    
+    setState(() {
+      _clasesMuestraActivas[actividadId] = 1;
     });
-    
-    final resultado = await ReservationService.reservarLugar(
-      actividadId: actividadId,
-      numeroLugar: numeroLugar,
-      usuarioId: _usuarioId,
+
+    final integranteData = _integrantesFamilia.firstWhere(
+      (i) => i['numero_usuario'] == integrante,
+      orElse: () => {'nombre': integrante, 'rol': 'miembro'}
     );
-    
-    if (!resultado['success']) {
-      setDialogState(() {
-        _reservasActivas.remove(actividadId);
-      });
-      
-      // Use the dialog context for showing snackbar in the dialog
-      if (dialogContext.mounted) {
-        ScaffoldMessenger.of(dialogContext).showSnackBar(
-          SnackBar(
-            content: Text(resultado['message'] ?? 'Error al reservar'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } else {
-      if (dialogContext.mounted) {
-        ScaffoldMessenger.of(dialogContext).showSnackBar(
-          SnackBar(
-            content: Text(resultado['message'] ?? 'Lugar reservado exitosamente'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Clase muestra confirmada para ${integranteData['nombre']} ($integrante) el ${DateFormat('dd/MM/yyyy').format(fecha)} a las ${hora.format(context)} en ${actividad.lugar}.',
+        ),
+        backgroundColor: Colors.green,
+      ),
+    );
   }
 
-  void _procesarPago(SportActivity actividad) {
+  void _confirmarClaseMuestra(SportActivity actividad) {
     final actividadId = actividad.id.toString();
-    final lugarSeleccionado = _reservasActivas[actividadId];
     
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text(
-          "Confirmar Reserva y Pago",
+          "Confirmar Clase Muestra",
           style: TextStyle(fontFamily: 'Montserrat', fontWeight: FontWeight.bold),
         ),
         content: Text(
-          "¿Desea proceder con el pago para:\n\n"
+          "¿Desea confirmar la clase muestra para:\n\n"
           "${actividad.nombreActividad}\n"
-          "Lugar: $lugarSeleccionado",
+          "Con el profesor: ${actividad.nombreProfesor}",
           style: const TextStyle(fontFamily: 'Montserrat'),
         ),
         actions: [
@@ -293,29 +510,25 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             onPressed: () {
               Navigator.pop(context);
               
-              // Use the widget's context for the main page snackbar
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      "Redirigiendo al pago: ${actividad.nombreActividad} - Lugar $lugarSeleccionado",
-                      style: const TextStyle(fontFamily: 'Montserrat'),
-                    ),
-                    backgroundColor: Colors.green,
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    "Clase muestra confirmada: ${actividad.nombreActividad}",
+                    style: const TextStyle(fontFamily: 'Montserrat'),
                   ),
-                );
-                
-                // Limpiar la reserva después del pago
-                setState(() {
-                  _reservasActivas.remove(actividadId);
-                });
-              }
+                  backgroundColor: Colors.green,
+                ),
+              );
+              
+              setState(() {
+                _clasesMuestraActivas.remove(actividadId);
+              });
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color.fromRGBO(13, 71, 161, 1),
             ),
             child: const Text(
-              "Pagar Ahora",
+              "Confirmar",
               style: TextStyle(
                 fontFamily: 'Montserrat',
                 color: Colors.white,
@@ -328,7 +541,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
-  void _cancelarReserva(SportActivity actividad) async {
+  void _cancelarClaseMuestra(SportActivity actividad) async {
     final actividadId = actividad.id.toString();
     
     final resultado = await ReservationService.cancelarReserva(
@@ -340,18 +553,18 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     
     if (resultado['success']) {
       setState(() {
-        _reservasActivas.remove(actividadId);
+        _clasesMuestraActivas.remove(actividadId);
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(resultado['message'] ?? "Reserva cancelada para ${actividad.nombreActividad}"),
+          content: Text(resultado['message'] ?? "Clase muestra cancelada para ${actividad.nombreActividad}"),
           backgroundColor: Colors.orange,
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(resultado['message'] ?? "Error al cancelar la reserva"),
+          content: Text(resultado['message'] ?? "Error al cancelar la clase muestra"),
           backgroundColor: Colors.red,
         ),
       );
@@ -394,8 +607,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       ),
     );
   }
-
-  // ... (rest of the methods remain the same - _buildContent, _buildListaActividades, etc.)
 
   Widget _buildContent() {
     return DefaultTabController(
@@ -468,11 +679,9 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
-  // ... (rest of the UI builder methods remain unchanged)
   Widget _buildTarjetaActividad(SportActivity actividad, Color color) {
     final actividadId = actividad.id.toString();
-    final tieneReserva = _reservasActivas.containsKey(actividadId);
-    final lugarSeleccionado = _reservasActivas[actividadId];
+    final tieneClaseMuestra = _clasesMuestraActivas.containsKey(actividadId);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -529,7 +738,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             
             if (actividad.avisos.isNotEmpty) _buildAvisos(actividad),
             
-            if (tieneReserva)
+            if (tieneClaseMuestra)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -541,11 +750,11 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.assignment_turned_in, color: Colors.green, size: 20),
+                    const Icon(Icons.school, color: Colors.green, size: 20),
                     const SizedBox(width: 8),
-                    Text(
-                      "Lugar reservado: $lugarSeleccionado",
-                      style: const TextStyle(
+                    const Text(
+                      "Clase muestra programada",
+                      style: TextStyle(
                         fontFamily: 'Montserrat',
                         fontWeight: FontWeight.bold,
                         color: Colors.green,
@@ -554,8 +763,8 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                     const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.cancel, color: Colors.red, size: 20),
-                      onPressed: () => _cancelarReserva(actividad),
-                      tooltip: "Cancelar reserva",
+                      onPressed: () => _cancelarClaseMuestra(actividad),
+                      tooltip: "Cancelar clase muestra",
                     ),
                   ],
                 ),
@@ -566,9 +775,9 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               width: double.infinity,
               height: 45,
               child: ElevatedButton.icon(
-                onPressed: () => _handleReserva(actividad),
+                onPressed: () => _handleClaseMuestra(actividad),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: tieneReserva 
+                  backgroundColor: tieneClaseMuestra 
                       ? Colors.green
                       : const Color.fromRGBO(13, 71, 161, 1),
                   foregroundColor: Colors.white,
@@ -578,11 +787,11 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   elevation: 2,
                 ),
                 icon: Icon(
-                  tieneReserva ? Icons.payment : Icons.assignment_turned_in,
+                  tieneClaseMuestra ? Icons.check_circle : Icons.school,
                   size: 20,
                 ),
                 label: Text(
-                  tieneReserva ? "PAGAR RESERVA" : "RESERVAR ACTIVIDAD",
+                  tieneClaseMuestra ? "CONFIRMAR CLASE MUESTRA" : "CLASE MUESTRA",
                   style: const TextStyle(
                     fontFamily: 'Montserrat',
                     fontWeight: FontWeight.bold,
