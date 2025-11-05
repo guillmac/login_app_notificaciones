@@ -17,7 +17,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   late Future<List<SportActivity>> _futureDeportivas;
   List<SportActivity> _actividadesInfantiles = [];
   List<SportActivity> _actividadesAdultos = [];
-  final Map<String, Map<String, dynamic>> _clasesMuestraActivas = {}; // Cambiado para almacenar más información
+  final Map<String, Map<String, dynamic>> _clasesMuestraActivas = {};
   final String _usuarioId = '1';
   List<Map<String, dynamic>> _integrantesFamilia = [];
   bool _loadingFamilia = true;
@@ -28,8 +28,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     _futureDeportivas = _loadActividadesDeportivas();
     _loadUserData();
   }
-
-  // ... (mantener todos los métodos de _loadUserData hasta _getColorRol igual)
 
   Future<void> _loadUserData() async {
     setState(() => _loadingFamilia = true);
@@ -227,14 +225,13 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
 
   Color _getColorRol(String rol) {
     switch (rol) {
-      case 'titular': return const Color.fromRGBO(25, 118, 210, 1);
-      case 'conyuge': return Colors.purple;
-      case 'hijo': return Colors.green;
+      case 'titular': return const Color(0xFF1565C0);
+      case 'conyuge': return const Color(0xFF7B1FA2);
+      case 'hijo': return const Color(0xFF2E7D32);
       default: return Colors.grey;
     }
   }
 
-  // Método para extraer días únicos de la actividad
   List<String> _extraerDiasDisponibles(SportActivity actividad) {
     final List<String> todosDias = [];
     
@@ -246,7 +243,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     return todosDias.where((dia) => dia.isNotEmpty).toSet().toList();
   }
 
-  // Método para extraer horarios únicos de la actividad
   List<String> _extraerHorariosDisponibles(SportActivity actividad) {
     final List<String> todosHorarios = [];
     
@@ -265,12 +261,16 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   }
 
   Future<List<SportActivity>> _loadActividadesDeportivas() async {
-    final actividades = await SportService.getActividadesDeportivas();
-    
-    _actividadesInfantiles = actividades.where((a) => a.isInfantil).toList();
-    _actividadesAdultos = actividades.where((a) => a.isAdulto).toList();
-    
-    return actividades;
+    try {
+      final actividades = await SportService.getActividadesDeportivas();
+      
+      _actividadesInfantiles = actividades.where((a) => a.isInfantil).toList();
+      _actividadesAdultos = actividades.where((a) => a.isAdulto).toList();
+      
+      return actividades;
+    } catch (e) {
+      throw Exception('Error al cargar actividades: $e');
+    }
   }
 
   void _refreshData() {
@@ -286,23 +286,23 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     if (!_clasesMuestraActivas.containsKey(actividadId)) {
       _mostrarFormularioClaseMuestra(actividad);
     }
-    // Eliminado el else - ya no hay segunda confirmación
   }
 
   void _mostrarFormularioClaseMuestra(SportActivity actividad) {
+    final diasDisponibles = _extraerDiasDisponibles(actividad);
+    final horariosDisponibles = _extraerHorariosDisponibles(actividad);
+
     String? integranteSeleccionado;
     String? diaSeleccionado;
     String? horarioSeleccionado;
 
-    // Extraer días y horarios disponibles
-    final diasDisponibles = _extraerDiasDisponibles(actividad);
-    final horariosDisponibles = _extraerHorariosDisponibles(actividad);
-
-    // Si solo hay un día/horario disponible, seleccionarlo automáticamente
-    if (diasDisponibles.length == 1) {
+    if (_integrantesFamilia.isNotEmpty) {
+      integranteSeleccionado = _integrantesFamilia.first['numero_usuario'] as String?;
+    }
+    if (diasDisponibles.isNotEmpty) {
       diaSeleccionado = diasDisponibles.first;
     }
-    if (horariosDisponibles.length == 1) {
+    if (horariosDisponibles.isNotEmpty) {
       horarioSeleccionado = horariosDisponibles.first;
     }
 
@@ -310,292 +310,251 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       context: context,
       builder: (context) {
         return StatefulBuilder(builder: (context, setModalState) {
-          return AlertDialog(
-            title: Text('Clase muestra - ${actividad.nombreActividad}'),
-            content: SingleChildScrollView(
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            elevation: 10,
+            insetPadding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 600,
+                maxHeight: 700,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Información de la actividad
-                  Card(
-                    elevation: 2,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
+                  // Header
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF1976D2), Color(0xFF0D47A1)],
+                      ),
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(16),
+                        topRight: Radius.circular(16),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        const Icon(
+                          Icons.school,
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Clase muestra - ${actividad.nombreActividad}',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Contenido
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(20),
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Información de la actividad:',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey[700],
+                          // Información de la actividad
+                          _buildActivityInfoCard(actividad),
+
+                          const SizedBox(height: 24),
+
+                          // Selector de integrante
+                          if (_loadingFamilia)
+                            _buildLoadingWidget()
+                          else if (_integrantesFamilia.isEmpty)
+                            _buildNoIntegrantsWidget()
+                          else
+                            _buildIntegrantDropdown(
+                              integranteSeleccionado,
+                              (value) => setModalState(() {
+                                integranteSeleccionado = value;
+                              }),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          _buildActivityInfoRow(Icons.sports, 'Actividad:', actividad.nombreActividad),
-                          _buildActivityInfoRow(Icons.person, 'Profesor:', actividad.nombreProfesor),
-                          _buildActivityInfoRow(Icons.place, 'Ubicación:', actividad.lugar),
-                          if (actividad.tieneDias)
-                            _buildActivityInfoRow(Icons.calendar_today, 'Días:', actividad.diasFormateados),
-                          if (actividad.horarios.isNotEmpty)
-                            _buildActivityInfoRow(Icons.access_time, 'Horarios:', actividad.horarios.join('\n')),
+
+                          if (diasDisponibles.isNotEmpty) ...[
+                            const SizedBox(height: 20),
+                            _buildDayDropdown(
+                              diasDisponibles,
+                              diaSeleccionado,
+                              (value) => setModalState(() {
+                                diaSeleccionado = value;
+                              }),
+                            ),
+                          ],
+
+                          if (horariosDisponibles.isNotEmpty) ...[
+                            const SizedBox(height: 20),
+                            _buildTimeDropdown(
+                              horariosDisponibles,
+                              horarioSeleccionado,
+                              (value) => setModalState(() {
+                                horarioSeleccionado = value;
+                              }),
+                            ),
+                          ],
                         ],
                       ),
                     ),
                   ),
 
-                  // Selector de integrante
-                  if (_loadingFamilia)
-                    const Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Column(
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 8),
-                          Text(
-                            'Cargando integrantes...',
-                            style: TextStyle(fontSize: 12),
+                  // Botones
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(16),
+                        bottomRight: Radius.circular(16),
+                      ),
+                      border: Border(
+                        top: BorderSide(color: Colors.grey[300]!),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              side: BorderSide(color: Colors.grey[400]!),
+                            ),
+                            child: const Text(
+                              'Cancelar',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ),
-                        ],
-                      ),
-                    )
-                  else if (_integrantesFamilia.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Column(
-                        children: [
-                          Icon(Icons.people_outline, size: 48, color: Colors.grey),
-                          SizedBox(height: 8),
-                          Text(
-                            'No se encontraron integrantes de la membresía',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: (integranteSeleccionado != null && 
+                                       (diasDisponibles.isEmpty || diaSeleccionado != null) &&
+                                       (horariosDisponibles.isEmpty || horarioSeleccionado != null))
+                                ? () {
+                                    Navigator.pop(context);
+                                    _asignarClaseMuestra(
+                                      actividad: actividad,
+                                      integrante: integranteSeleccionado!,
+                                      diaSeleccionado: diaSeleccionado,
+                                      horarioSeleccionado: horarioSeleccionado,
+                                    );
+                                  }
+                                : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1976D2),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text(
+                              'Confirmar',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
-                        ],
-                      ),
-                    )
-                  else
-                    Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 200,
-                        maxWidth: 400,
-                      ),
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Selecciona integrante de la membresía',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                         ),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Colors.black87,
-                        ),
-                        initialValue: integranteSeleccionado,
-                        items: _integrantesFamilia.map<DropdownMenuItem<String>>((integrante) {
-                          final numeroUsuario = integrante['numero_usuario'] as String;
-                          final nombre = integrante['nombre'] as String;
-                          final rol = integrante['rol'] as String;
-                          final rolDisplay = _getRolDisplay(rol);
-                          final colorRol = _getColorRol(rol);
-                          
-                          return DropdownMenuItem<String>(
-                            value: numeroUsuario,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 12,
-                                    height: 12,
-                                    decoration: BoxDecoration(
-                                      color: colorRol,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          nombre.isNotEmpty ? nombre : 'Nombre no disponible',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        Text(
-                                          '$numeroUsuario • $rolDisplay',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey[600],
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setModalState(() => integranteSeleccionado = value);
-                        },
-                      ),
+                      ],
                     ),
-
-                  const SizedBox(height: 16),
-
-                  // Selector de día (solo si hay días disponibles)
-                  if (diasDisponibles.isNotEmpty)
-                    Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 200,
-                        maxWidth: 400,
-                      ),
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Selecciona un día',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                        ),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Colors.black87,
-                        ),
-                        initialValue: diaSeleccionado,
-                        items: diasDisponibles.map<DropdownMenuItem<String>>((dia) {
-                          return DropdownMenuItem<String>(
-                            value: dia,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    dia,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setModalState(() => diaSeleccionado = value);
-                        },
-                      ),
-                    ),
-
-                  if (diasDisponibles.isNotEmpty) const SizedBox(height: 16),
-
-                  // Selector de horario (solo si hay horarios disponibles)
-                  if (horariosDisponibles.isNotEmpty)
-                    Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 200,
-                        maxWidth: 400,
-                      ),
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Selecciona un horario',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                        ),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Colors.black87,
-                        ),
-                        initialValue: horarioSeleccionado,
-                        items: horariosDisponibles.map<DropdownMenuItem<String>>((horario) {
-                          return DropdownMenuItem<String>(
-                            value: horario,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.access_time, size: 16, color: Colors.green),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    horario,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setModalState(() => horarioSeleccionado = value);
-                        },
-                      ),
-                    ),
+                  ),
                 ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-              ElevatedButton(
-                onPressed: (integranteSeleccionado != null && 
-                           (diasDisponibles.isEmpty || diaSeleccionado != null) &&
-                           (horariosDisponibles.isEmpty || horarioSeleccionado != null))
-                    ? () {
-                        Navigator.pop(context);
-                        _asignarClaseMuestra(
-                          actividad: actividad,
-                          integrante: integranteSeleccionado!,
-                          diaSeleccionado: diaSeleccionado,
-                          horarioSeleccionado: horarioSeleccionado,
-                        );
-                      }
-                    : null,
-                child: const Text('Confirmar clase muestra'),
-              ),
-            ],
           );
         });
       },
     );
   }
 
+  Widget _buildActivityInfoCard(SportActivity actividad) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.info, color: Color(0xFF1976D2), size: 18),
+              SizedBox(width: 8),
+              Text(
+                'Información de la actividad',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1976D2),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildActivityInfoRow(Icons.sports, 'Actividad:', actividad.nombreActividad),
+          _buildActivityInfoRow(Icons.person, 'Profesor:', actividad.nombreProfesor),
+          _buildActivityInfoRow(Icons.place, 'Ubicación:', actividad.lugar),
+          if (actividad.tieneDias)
+            _buildActivityInfoRow(Icons.calendar_today, 'Días:', actividad.diasFormateados),
+          if (actividad.horarios.isNotEmpty)
+            _buildActivityInfoRow(Icons.access_time, 'Horarios:', actividad.horarios.join(', ')),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActivityInfoRow(IconData icon, String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: Colors.grey[600]),
-          const SizedBox(width: 8),
+          Icon(icon, size: 18, color: const Color(0xFF1976D2)),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontWeight: FontWeight.w600,
-                    color: Colors.grey[700],
-                    fontSize: 13,
+                    color: Colors.grey,
+                    fontSize: 14,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Text(
-                  value,
+                  value.isNotEmpty ? value : 'No disponible',
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 15,
                     color: Colors.black87,
                   ),
                 ),
@@ -607,6 +566,295 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
+  Widget _buildLoadingWidget() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Column(
+        children: [
+          CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1976D2)),
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Cargando integrantes...',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoIntegrantsWidget() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Column(
+        children: [
+          Icon(Icons.people_outline, size: 48, color: Colors.grey),
+          SizedBox(height: 12),
+          Text(
+            'No se encontraron integrantes de la membresía',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIntegrantDropdown(
+    String? selectedValue,
+    ValueChanged<String?> onChanged,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Selecciona integrante:',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: DropdownButtonFormField<String>(
+            isExpanded: true,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey[400]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey[400]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF1976D2), width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+            style: const TextStyle(fontSize: 15, color: Colors.black87),
+            initialValue: selectedValue,
+            items: _integrantesFamilia.map<DropdownMenuItem<String>>((integrante) {
+              final numeroUsuario = integrante['numero_usuario'] as String;
+              final nombre = integrante['nombre'] as String;
+              final rol = integrante['rol'] as String;
+              final rolDisplay = _getRolDisplay(rol);
+              final colorRol = _getColorRol(rol);
+              
+              return DropdownMenuItem<String>(
+                value: numeroUsuario,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: colorRol,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              nombre.isNotEmpty ? nombre : 'Nombre no disponible',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '$numeroUsuario • $rolDisplay',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey[600],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+            onChanged: onChanged,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDayDropdown(
+    List<String> diasDisponibles,
+    String? selectedValue,
+    ValueChanged<String?> onChanged,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Selecciona un día:',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: DropdownButtonFormField<String>(
+            isExpanded: true,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey[400]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey[400]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF1976D2), width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              filled: true,
+              fillColor: Colors.white,
+              prefixIcon: const Icon(Icons.calendar_today, color: Color(0xFF1976D2)),
+            ),
+            style: const TextStyle(fontSize: 15, color: Colors.black87),
+            initialValue: selectedValue,
+            items: diasDisponibles.map<DropdownMenuItem<String>>((dia) {
+              return DropdownMenuItem<String>(
+                value: dia,
+                child: Text(
+                  dia,
+                  style: const TextStyle(fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }).toList(),
+            onChanged: onChanged,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTimeDropdown(
+    List<String> horariosDisponibles,
+    String? selectedValue,
+    ValueChanged<String?> onChanged,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Selecciona un horario:',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: DropdownButtonFormField<String>(
+            isExpanded: true,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey[400]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey[400]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF1976D2), width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              filled: true,
+              fillColor: Colors.white,
+              prefixIcon: const Icon(Icons.access_time, color: Color(0xFF2E7D32)),
+            ),
+            style: const TextStyle(fontSize: 15, color: Colors.black87),
+            initialValue: selectedValue,
+            items: horariosDisponibles.map<DropdownMenuItem<String>>((horario) {
+              return DropdownMenuItem<String>(
+                value: horario,
+                child: Text(
+                  horario,
+                  style: const TextStyle(fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }).toList(),
+            onChanged: onChanged,
+          ),
+        ),
+      ],
+    );
+  }
+
   void _asignarClaseMuestra({
     required SportActivity actividad,
     required String integrante,
@@ -615,7 +863,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   }) {
     final actividadId = actividad.id.toString();
     
-    // Almacenar toda la información de la clase muestra
     setState(() {
       _clasesMuestraActivas[actividadId] = {
         'integrante': integrante,
@@ -630,7 +877,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       orElse: () => {'nombre': integrante, 'rol': 'miembro'}
     );
 
-    // Construir mensaje con la información completa
     String mensaje = '✅ Clase muestra confirmada\n\n'
                     '👤 Para: ${integranteData['nombre']} ($integrante)\n'
                     '📋 Actividad: ${actividad.nombreActividad}\n'
@@ -651,18 +897,15 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
           mensaje,
           style: const TextStyle(fontSize: 14),
         ),
-        backgroundColor: Colors.green,
+        backgroundColor: const Color(0xFF2E7D32),
         duration: const Duration(seconds: 6),
       ),
     );
   }
 
-  // Eliminado el método _confirmarClaseMuestra - ya no es necesario
-
   void _cancelarClaseMuestra(SportActivity actividad) async {
     final actividadId = actividad.id.toString();
     
-    // Mostrar diálogo de confirmación antes de cancelar
     final confirmarCancelacion = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -721,7 +964,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       appBar: AppBar(
         title: const Text(
           "Actividades Deportivas",
-          style: TextStyle(fontFamily: 'Montserrat', fontWeight: FontWeight.bold),
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
@@ -752,8 +995,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
-  // ... (mantener todos los métodos de build restantes)
-
   Widget _buildContent() {
     return DefaultTabController(
       length: 2,
@@ -764,18 +1005,17 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: _getColorWithOpacity(Colors.black, 0.1),
+                  color: Colors.black.withOpacity(0.1),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
               ],
             ),
             child: const TabBar(
-              labelColor: Color.fromRGBO(13, 71, 161, 1),
+              labelColor: Color(0xFF0D47A1),
               unselectedLabelColor: Colors.grey,
-              indicatorColor: Color.fromRGBO(13, 71, 161, 1),
+              indicatorColor: Color(0xFF0D47A1),
               labelStyle: TextStyle(
-                fontFamily: 'Montserrat',
                 fontWeight: FontWeight.bold,
               ),
               tabs: [
@@ -845,7 +1085,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   child: Text(
                     actividad.nombreActividad,
                     style: const TextStyle(
-                      fontFamily: 'Montserrat',
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
@@ -854,13 +1093,12 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _getColorWithOpacity(color, 0.1),
+                    color: color.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     actividad.categoria.toUpperCase(),
                     style: TextStyle(
-                      fontFamily: 'Montserrat',
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                       color: color,
@@ -891,7 +1129,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 padding: const EdgeInsets.all(12),
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: _getColorWithOpacity(Colors.green, 0.1),
+                  color: Colors.green.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.green),
                 ),
@@ -905,7 +1143,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                         const Text(
                           "Clase muestra programada",
                           style: TextStyle(
-                            fontFamily: 'Montserrat',
                             fontWeight: FontWeight.bold,
                             color: Colors.green,
                           ),
@@ -943,22 +1180,20 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 onPressed: () => _handleClaseMuestra(actividad),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: tieneClaseMuestra 
-                      ? Colors.grey // Cambiado a gris cuando ya está programada
-                      : const Color.fromRGBO(13, 71, 161, 1),
+                      ? Colors.grey
+                      : const Color(0xFF0D47A1),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  elevation: 2,
                 ),
                 icon: Icon(
                   tieneClaseMuestra ? Icons.check_circle : Icons.school,
                   size: 20,
                 ),
                 label: Text(
-                  tieneClaseMuestra ? "CLASE MUESTRA PROGRAMADA" : "SOLICITAR CLASE MUESTRA", // Texto cambiado
+                  tieneClaseMuestra ? "CLASE MUESTRA PROGRAMADA" : "SOLICITAR CLASE MUESTRA",
                   style: const TextStyle(
-                    fontFamily: 'Montserrat',
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                   ),
@@ -987,7 +1222,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   Text(
                     actividad.diasFormateados,
                     style: const TextStyle(
-                      fontFamily: 'Montserrat',
                       fontSize: 14,
                       color: Colors.black87,
                       fontWeight: FontWeight.w500,
@@ -997,7 +1231,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   ...actividad.horarios.map((horario) => Text(
                     horario,
                     style: const TextStyle(
-                      fontFamily: 'Montserrat',
                       fontSize: 13,
                       color: Colors.black54,
                     ),
@@ -1006,7 +1239,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   const Text(
                     'Horario por confirmar',
                     style: TextStyle(
-                      fontFamily: 'Montserrat',
                       fontSize: 13,
                       color: Colors.grey,
                       fontStyle: FontStyle.italic,
@@ -1028,7 +1260,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         const Text(
           "Grupos Disponibles:",
           style: TextStyle(
-            fontFamily: 'Montserrat',
             fontSize: 14,
             fontWeight: FontWeight.bold,
           ),
@@ -1042,11 +1273,10 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               label: Text(
                 grupo,
                 style: const TextStyle(
-                  fontFamily: 'Montserrat',
                   fontSize: 11,
                 ),
               ),
-              backgroundColor: _getColorWithOpacity(Colors.blue, 0.1),
+              backgroundColor: Colors.blue.withOpacity(0.1),
               visualDensity: VisualDensity.compact,
             );
           }).toList(),
@@ -1061,7 +1291,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       const Text(
         "Costos Mensuales:",
         style: TextStyle(
-          fontFamily: 'Montserrat',
           fontSize: 14,
           fontWeight: FontWeight.bold,
         ),
@@ -1075,11 +1304,10 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             label: Text(
               costo,
               style: const TextStyle(
-                fontFamily: 'Montserrat',
                 fontSize: 12,
               ),
             ),
-            backgroundColor: _getColorWithOpacity(Colors.green, 0.1),
+            backgroundColor: Colors.green.withOpacity(0.1),
             visualDensity: VisualDensity.compact,
           );
         }).toList(),
@@ -1094,7 +1322,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: _getColorWithOpacity(Colors.orange, 0.1),
+            color: Colors.orange.withOpacity(0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -1104,10 +1332,9 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               Expanded(
                 child: Text(
                   actividad.avisos,
-                  style: TextStyle(
-                    fontFamily: 'Montserrat',
+                  style: const TextStyle(
                     fontSize: 12,
-                    color: _getMaterialColor(Colors.orange, 800),
+                    color: Colors.orange,
                   ),
                 ),
               ),
@@ -1131,7 +1358,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             child: Text(
               text,
               style: const TextStyle(
-                fontFamily: 'Montserrat',
                 fontSize: 14,
                 color: Colors.black54,
               ),
@@ -1147,13 +1373,12 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.sports_soccer, size: 64, color: _getMaterialColor(Colors.grey, 300)),
+          Icon(Icons.sports_soccer, size: 64, color: Colors.grey[300]),
           const SizedBox(height: 16),
           Text(
             message,
             textAlign: TextAlign.center,
             style: const TextStyle(
-              fontFamily: 'Montserrat',
               fontSize: 16,
               color: Colors.grey,
             ),
@@ -1173,7 +1398,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
           const Text(
             "Error al cargar actividades",
             style: TextStyle(
-              fontFamily: 'Montserrat',
               fontSize: 18,
               color: Colors.grey,
             ),
@@ -1183,7 +1407,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             error,
             textAlign: TextAlign.center,
             style: const TextStyle(
-              fontFamily: 'Montserrat',
               fontSize: 12,
               color: Colors.grey,
             ),
@@ -1191,33 +1414,10 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _refreshData,
-            child: const Text(
-              "Reintentar",
-              style: TextStyle(fontFamily: 'Montserrat'),
-            ),
+            child: const Text("Reintentar"),
           ),
         ],
       ),
     );
-  }
-
-  Color _getColorWithOpacity(Color color, double opacity) {
-    return Color.alphaBlend(color.withAlpha((opacity * 255).round()), Colors.transparent);
-  }
-
-  Color _getMaterialColor(MaterialColor color, int shade) {
-    switch (shade) {
-      case 50: return color.shade50;
-      case 100: return color.shade100;
-      case 200: return color.shade200;
-      case 300: return color.shade300;
-      case 400: return color.shade400;
-      case 500: return color.shade500;
-      case 600: return color.shade600;
-      case 700: return color.shade700;
-      case 800: return color.shade800;
-      case 900: return color.shade900;
-      default: return color;
-    }
   }
 }
