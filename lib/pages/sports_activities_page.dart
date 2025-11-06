@@ -74,20 +74,19 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
           List<Map<String, dynamic>> integrantes = [];
           
           for (var usuario in usuariosData) {
-            if (usuario is String) {
-              integrantes.add({
-                'numero_usuario': usuario,
-                'nombre': _obtenerNombreDeUsuario(usuario),
-                'rol': _determinarRol(usuario),
-              });
-            } else if (usuario is Map) {
+            if (usuario is Map) {
               final usuarioMap = Map<String, dynamic>.from(usuario);
               
+              // Extraer primer_nombre y primer_apellido directamente del mapa
+              String primerNombre = usuarioMap['primer_nombre']?.toString() ?? '';
+              String primerApellido = usuarioMap['primer_apellido']?.toString() ?? '';
               String nombreCompleto = _obtenerNombreCompletoDeUsuario(usuarioMap);
               
               integrantes.add({
                 'numero_usuario': usuarioMap['numero_usuario']?.toString() ?? usuarioMap['id']?.toString() ?? 'N/A',
                 'nombre': nombreCompleto,
+                'primer_nombre': primerNombre,
+                'primer_apellido': primerApellido,
                 'rol': usuarioMap['rol']?.toString() ?? _determinarRol(usuarioMap['numero_usuario']?.toString() ?? ''),
               });
             }
@@ -165,11 +164,15 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
           final dataMap = Map<String, dynamic>.from(data);
           
           String nombreCompleto = _obtenerNombreCompletoDeUsuario(dataMap);
+          String primerNombre = dataMap['primer_nombre']?.toString() ?? '';
+          String primerApellido = dataMap['primer_apellido']?.toString() ?? '';
           
           setState(() {
             _integrantesFamilia = [{
               'numero_usuario': dataMap['numero_usuario']?.toString() ?? numeroUsuario,
               'nombre': nombreCompleto,
+              'primer_nombre': primerNombre,
+              'primer_apellido': primerApellido,
               'rol': 'titular',
             }];
           });
@@ -189,14 +192,11 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       _integrantesFamilia = [{
         'numero_usuario': numeroUsuario,
         'nombre': 'Usuario Principal',
+        'primer_nombre': 'Usuario',
+        'primer_apellido': 'Principal',
         'rol': 'titular',
       }];
     });
-  }
-
-  String _obtenerNombreDeUsuario(String numeroUsuario) {
-    final rol = _determinarRol(numeroUsuario);
-    return _obtenerNombrePorRol(rol);
   }
 
   String _determinarRol(String numeroUsuario) {
@@ -636,7 +636,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Color.fromRGBO(0, 0, 0, 0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -657,23 +657,61 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 borderRadius: BorderRadius.circular(8),
                 borderSide: const BorderSide(color: Color(0xFF1976D2), width: 2),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               filled: true,
               fillColor: Colors.white,
             ),
             style: const TextStyle(fontSize: 15, color: Colors.black87),
             initialValue: selectedValue,
+            selectedItemBuilder: (BuildContext context) {
+              return _integrantesFamilia.map<Widget>((integrante) {
+                final numeroUsuario = integrante['numero_usuario'] as String;
+                final primerNombre = integrante['primer_nombre'] as String? ?? '';
+                final primerApellido = integrante['primer_apellido'] as String? ?? '';
+                final rol = integrante['rol'] as String;
+                final rolDisplay = _getRolDisplay(rol);
+                
+                String displayText = '';
+                if (primerNombre.isNotEmpty && primerApellido.isNotEmpty) {
+                  displayText = '$primerNombre $primerApellido - $numeroUsuario - $rolDisplay';
+                } else {
+                  final nombreCompleto = integrante['nombre'] as String? ?? 'Usuario';
+                  displayText = '$nombreCompleto - $numeroUsuario - $rolDisplay';
+                }
+                
+                return Text(
+                  displayText,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                );
+              }).toList();
+            },
             items: _integrantesFamilia.map<DropdownMenuItem<String>>((integrante) {
               final numeroUsuario = integrante['numero_usuario'] as String;
-              final nombre = integrante['nombre'] as String;
+              final primerNombre = integrante['primer_nombre'] as String? ?? '';
+              final primerApellido = integrante['primer_apellido'] as String? ?? '';
               final rol = integrante['rol'] as String;
               final rolDisplay = _getRolDisplay(rol);
               final colorRol = _getColorRol(rol);
               
+              // Crear el texto en una sola línea: "PrimerNombre PrimerApellido - NumeroUsuario - Rol"
+              String displayText = '';
+              if (primerNombre.isNotEmpty && primerApellido.isNotEmpty) {
+                displayText = '$primerNombre $primerApellido - $numeroUsuario - $rolDisplay';
+              } else {
+                // Fallback si no hay nombre y apellido
+                final nombreCompleto = integrante['nombre'] as String? ?? 'Usuario';
+                displayText = '$nombreCompleto - $numeroUsuario - $rolDisplay';
+              }
+              
               return DropdownMenuItem<String>(
                 value: numeroUsuario,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Row(
                     children: [
                       Container(
@@ -686,27 +724,13 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              nombre.isNotEmpty ? nombre : 'Nombre no disponible',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '$numeroUsuario • $rolDisplay',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey[600],
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                        child: Text(
+                          displayText,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -743,7 +767,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Color.fromRGBO(0, 0, 0, 0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -810,7 +834,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Color.fromRGBO(0, 0, 0, 0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -1005,7 +1029,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
+                  color: Color.fromRGBO(0, 0, 0, 0.1),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
@@ -1093,7 +1117,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
+                    color: Color.fromRGBO(0, 0, 0, 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -1129,7 +1153,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 padding: const EdgeInsets.all(12),
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
+                  color: Color.fromRGBO(0, 0, 0, 0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.green),
                 ),
@@ -1276,7 +1300,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   fontSize: 11,
                 ),
               ),
-              backgroundColor: Colors.blue.withOpacity(0.1),
+              backgroundColor: Color.fromRGBO(33, 150, 243, 0.1),
               visualDensity: VisualDensity.compact,
             );
           }).toList(),
@@ -1307,7 +1331,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 fontSize: 12,
               ),
             ),
-            backgroundColor: Colors.green.withOpacity(0.1),
+            backgroundColor: Color.fromRGBO(33, 150, 243, 0.1),
             visualDensity: VisualDensity.compact,
           );
         }).toList(),
@@ -1322,7 +1346,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.1),
+            color: Color.fromRGBO(0, 0, 0, 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
