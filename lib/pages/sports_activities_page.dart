@@ -27,6 +27,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     super.initState();
     _futureDeportivas = _loadActividadesDeportivas();
     _loadUserData();
+    _loadClasesMuestraActivas();
   }
 
   Future<void> _loadUserData() async {
@@ -50,6 +51,46 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     setState(() {
       _integrantesFamilia = [];
     });
+  }
+
+  // Cargar clases muestra activas desde la base de datos
+  Future<void> _loadClasesMuestraActivas() async {
+    try {
+      final userData = await SessionManager.getCurrentUser();
+      if (userData != null) {
+        final numeroUsuario = userData['numero_usuario'] ?? '';
+        final response = await http.post(
+          Uri.parse("https://clubfrance.org.mx/api/get_clases_muestra.php"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({"numero_usuario": numeroUsuario}),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['success'] == true && data['clases_muestra'] != null) {
+            final List<dynamic> clasesData = data['clases_muestra'];
+            setState(() {
+              _clasesMuestraActivas.clear();
+              for (var clase in clasesData) {
+                final claseMap = Map<String, dynamic>.from(clase);
+                final actividadId = claseMap['actividad_id']?.toString() ?? '';
+                if (actividadId.isNotEmpty) {
+                  _clasesMuestraActivas[actividadId] = {
+                    'integrante': claseMap['numero_usuario_integrante']?.toString() ?? '',
+                    'dia': claseMap['dia_seleccionado']?.toString(),
+                    'horario': claseMap['horario_seleccionado']?.toString(),
+                    'fechaAsignacion': DateTime.parse(claseMap['fecha_registro'] ?? DateTime.now().toString()),
+                    'id_reserva': claseMap['id']?.toString(),
+                  };
+                }
+              }
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print('Error al cargar clases muestra: $e');
+    }
   }
 
   Future<void> _loadIntegrantesFamilia(String numeroUsuarioBase) async {
@@ -153,7 +194,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   Future<void> _loadInfoUsuarioActual(String numeroUsuario) async {
     try {
       final response = await http.post(
-        Uri.parse("https://clubfrance.org.mx/api/get_user_info.php"),
+        Uri.parse("https://clubfrance.org.mx/api/get_usuario_info.php"), // ✅ CORREGIDO
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"numero_usuario": numeroUsuario}),
       );
@@ -183,6 +224,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         _setIntegrantePorDefecto(numeroUsuario);
       }
     } catch (e) {
+      print('Error en _loadInfoUsuarioActual: $e');
       _setIntegrantePorDefecto(numeroUsuario);
     }
   }
@@ -269,6 +311,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
       
       return actividades;
     } catch (e) {
+      print('Error detallado en _loadActividadesDeportivas: $e');
       throw Exception('Error al cargar actividades: $e');
     }
   }
@@ -276,7 +319,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   void _refreshData() {
     setState(() {
       _futureDeportivas = _loadActividadesDeportivas();
-      _clasesMuestraActivas.clear();
+      _loadClasesMuestraActivas();
     });
   }
 
@@ -636,7 +679,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Color.fromRGBO(0, 0, 0, 0.05),
+                color: Colors.black.withOpacity(0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -662,7 +705,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               fillColor: Colors.white,
             ),
             style: const TextStyle(fontSize: 15, color: Colors.black87),
-            initialValue: selectedValue,
+            value: selectedValue,
             selectedItemBuilder: (BuildContext context) {
               return _integrantesFamilia.map<Widget>((integrante) {
                 final numeroUsuario = integrante['numero_usuario'] as String;
@@ -767,7 +810,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Color.fromRGBO(0, 0, 0, 0.05),
+                color: Colors.black.withOpacity(0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -794,7 +837,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               prefixIcon: const Icon(Icons.calendar_today, color: Color(0xFF1976D2)),
             ),
             style: const TextStyle(fontSize: 15, color: Colors.black87),
-            initialValue: selectedValue,
+            value: selectedValue,
             items: diasDisponibles.map<DropdownMenuItem<String>>((dia) {
               return DropdownMenuItem<String>(
                 value: dia,
@@ -834,7 +877,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Color.fromRGBO(0, 0, 0, 0.05),
+                color: Colors.black.withOpacity(0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -861,7 +904,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               prefixIcon: const Icon(Icons.access_time, color: Color(0xFF2E7D32)),
             ),
             style: const TextStyle(fontSize: 15, color: Colors.black87),
-            initialValue: selectedValue,
+            value: selectedValue,
             items: horariosDisponibles.map<DropdownMenuItem<String>>((horario) {
               return DropdownMenuItem<String>(
                 value: horario,
@@ -879,23 +922,71 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
-  void _asignarClaseMuestra({
+  Future<void> _asignarClaseMuestra({
     required SportActivity actividad,
     required String integrante,
     required String? diaSeleccionado,
     required String? horarioSeleccionado,
-  }) {
+  }) async {
     final actividadId = actividad.id.toString();
     
-    setState(() {
-      _clasesMuestraActivas[actividadId] = {
-        'integrante': integrante,
-        'dia': diaSeleccionado,
-        'horario': horarioSeleccionado,
-        'fechaAsignacion': DateTime.now(),
-      };
-    });
+    try {
+      final userData = await SessionManager.getCurrentUser();
+      if (userData == null) {
+        _mostrarErrorSnackBar('No se pudo obtener la información del usuario');
+        return;
+      }
 
+      final numeroUsuarioBase = userData['numero_usuario'] ?? '';
+
+      // Guardar en la base de datos
+      final response = await http.post(
+        Uri.parse("https://clubfrance.org.mx/api/guardar_clase_muestra.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "numero_usuario_base": numeroUsuarioBase,
+          "numero_usuario_integrante": integrante,
+          "actividad_id": actividadId,
+          "actividad_nombre": actividad.nombreActividad,
+          "profesor": actividad.nombreProfesor,
+          "ubicacion": actividad.lugar,
+          "dia_seleccionado": diaSeleccionado,
+          "horario_seleccionado": horarioSeleccionado,
+          "fecha_registro": DateTime.now().toIso8601String(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          setState(() {
+            _clasesMuestraActivas[actividadId] = {
+              'integrante': integrante,
+              'dia': diaSeleccionado,
+              'horario': horarioSeleccionado,
+              'fechaAsignacion': DateTime.now(),
+              'id_reserva': data['id_reserva']?.toString(),
+            };
+          });
+
+          _mostrarConfirmacionSnackBar(actividad, integrante, diaSeleccionado, horarioSeleccionado);
+        } else {
+          _mostrarErrorSnackBar(data['message'] ?? 'Error al guardar la clase muestra');
+        }
+      } else {
+        _mostrarErrorSnackBar('Error de conexión al servidor');
+      }
+    } catch (e) {
+      _mostrarErrorSnackBar('Error: $e');
+    }
+  }
+
+  void _mostrarConfirmacionSnackBar(
+    SportActivity actividad, 
+    String integrante, 
+    String? diaSeleccionado, 
+    String? horarioSeleccionado
+  ) {
     final integranteData = _integrantesFamilia.firstWhere(
       (i) => i['numero_usuario'] == integrante,
       orElse: () => {'nombre': integrante, 'rol': 'miembro'}
@@ -927,9 +1018,32 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
+  void _mostrarErrorSnackBar(String mensaje) {
+    // Verificar si es error de endpoint
+    if (mensaje.contains('404') || mensaje.contains('Not Found')) {
+      mensaje = 'Servicio no encontrado. Verifica los endpoints.';
+    } else if (mensaje.contains('500')) {
+      mensaje = 'Error interno del servidor.';
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '❌ $mensaje',
+          style: const TextStyle(fontSize: 14),
+        ),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   void _cancelarClaseMuestra(SportActivity actividad) async {
     final actividadId = actividad.id.toString();
+    final infoClase = _clasesMuestraActivas[actividadId];
     
+    if (infoClase == null) return;
+
     final confirmarCancelacion = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -955,30 +1069,41 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
 
     if (confirmarCancelacion != true) return;
 
-    final resultado = await ReservationService.cancelarReserva(
-      actividadId: actividadId,
-      usuarioId: _usuarioId,
-    );
-    
-    if (!mounted) return;
-    
-    if (resultado['success']) {
-      setState(() {
-        _clasesMuestraActivas.remove(actividadId);
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(resultado['message'] ?? "Clase muestra cancelada para ${actividad.nombreActividad}"),
-          backgroundColor: Colors.orange,
-        ),
+    try {
+      final idReserva = infoClase['id_reserva']?.toString();
+      if (idReserva == null) {
+        _mostrarErrorSnackBar('No se pudo identificar la reserva para cancelar');
+        return;
+      }
+
+      final response = await http.post(
+        Uri.parse("https://clubfrance.org.mx/api/cancelar_clase_muestra.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "id_reserva": idReserva,
+        }),
       );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(resultado['message'] ?? "Error al cancelar la clase muestra"),
-          backgroundColor: Colors.red,
-        ),
-      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          setState(() {
+            _clasesMuestraActivas.remove(actividadId);
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(data['message'] ?? "Clase muestra cancelada para ${actividad.nombreActividad}"),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        } else {
+          _mostrarErrorSnackBar(data['message'] ?? "Error al cancelar la clase muestra");
+        }
+      } else {
+        _mostrarErrorSnackBar('Error de conexión al servidor');
+      }
+    } catch (e) {
+      _mostrarErrorSnackBar('Error: $e');
     }
   }
 
@@ -1004,17 +1129,35 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         future: _futureDeportivas,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+            return _buildLoadingState();
           }
 
           if (snapshot.hasError) {
             return _buildErrorState(snapshot.error.toString());
           }
 
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return _buildEmptyState();
+          }
+
           return _buildContent();
         },
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          const Text(
+            "Cargando actividades...",
+            style: TextStyle(fontSize: 16),
+          ),
+        ],
       ),
     );
   }
@@ -1029,7 +1172,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Color.fromRGBO(0, 0, 0, 0.1),
+                  color: Colors.black.withOpacity(0.1),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
@@ -1117,7 +1260,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Color.fromRGBO(0, 0, 0, 0.1),
+                    color: color.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -1153,7 +1296,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 padding: const EdgeInsets.all(12),
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: Color.fromRGBO(0, 0, 0, 0.1),
+                  color: Colors.green.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.green),
                 ),
@@ -1300,7 +1443,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   fontSize: 11,
                 ),
               ),
-              backgroundColor: Color.fromRGBO(33, 150, 243, 0.1),
+              backgroundColor: Colors.blue.withOpacity(0.1),
               visualDensity: VisualDensity.compact,
             );
           }).toList(),
@@ -1331,7 +1474,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 fontSize: 12,
               ),
             ),
-            backgroundColor: Color.fromRGBO(33, 150, 243, 0.1),
+            backgroundColor: Colors.green.withOpacity(0.1),
             visualDensity: VisualDensity.compact,
           );
         }).toList(),
@@ -1346,7 +1489,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Color.fromRGBO(0, 0, 0, 0.1),
+            color: Colors.orange.withOpacity(0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -1392,7 +1535,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     );
   }
 
-  Widget _buildEmptyState(String message) {
+  Widget _buildEmptyState([String message = "No hay actividades disponibles"]) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1414,34 +1557,50 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
 
   Widget _buildErrorState(String error) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 64, color: Colors.red),
-          const SizedBox(height: 16),
-          const Text(
-            "Error al cargar actividades",
-            style: TextStyle(
-              fontSize: 18,
-              color: Colors.grey,
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Colors.red),
+            const SizedBox(height: 16),
+            const Text(
+              "Error de conexión",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.red,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            error,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
+            const SizedBox(height: 12),
+            Text(
+              _getUserFriendlyError(error),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                color: Colors.grey,
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: _refreshData,
-            child: const Text("Reintentar"),
-          ),
-        ],
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _refreshData,
+              child: const Text("Reintentar"),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  String _getUserFriendlyError(String error) {
+    if (error.contains('Failed host lookup') || error.contains('SocketException')) {
+      return 'No se pudo conectar con el servidor. Verifica tu conexión a internet.';
+    } else if (error.contains('timed out')) {
+      return 'El servidor está tardando demasiado en responder. Intenta nuevamente.';
+    } else if (error.contains('404')) {
+      return 'El servicio no está disponible en este momento.';
+    } else {
+      return 'Error: $error';
+    }
   }
 }
