@@ -186,34 +186,12 @@ class NotificationService {
       // Obtener token actual del dispositivo
       String? token = await _firebaseMessaging.getToken();
       
-      if (token != null) {
-        if (kDebugMode) {
-          print('✅ ======= TOKEN FCM OBTENIDO =======');
-          print('✅ $token');
-          print('✅ =================================');
-        }
-      } else {
-        if (kDebugMode) {
-          print('❌ Token FCM es null');
-        }
-        
-        // Reintentar después de un delay
-        await Future.delayed(const Duration(seconds: 2));
-        token = await _firebaseMessaging.getToken();
-        
-        if (token != null) {
-          if (kDebugMode) {
-            print('✅ ======= TOKEN FCM (SEGUNDO INTENTO) =======');
-            print('✅ $token');
-            print('✅ =========================================');
-          }
-        } else {
-          if (kDebugMode) {
-            print('❌ No se pudo obtener el token FCM después de varios intentos');
-          }
-        }
+      if (kDebugMode) {
+        print('✅ ======= TOKEN FCM OBTENIDO =======');
+        print('✅ $token');
+        print('✅ =================================');
       }
-
+    
       // Escuchar cambios en el token (puede cambiar con el tiempo)
       _firebaseMessaging.onTokenRefresh.listen((String newToken) {
         if (kDebugMode) {

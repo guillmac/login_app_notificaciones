@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
+import 'package:intl/intl.dart';
 import '../models/sport_activity.dart';
 import '../services/sport_service.dart';
-import '../services/reservation_service.dart';
+import '../services/payment_service.dart';
 import '../utils/session_manager.dart';
+import '../pages/payment_screen.dart';
+import 'mis_clases_page.dart';
 
 class SportsActivitiesPage extends StatefulWidget {
   const SportsActivitiesPage({super.key});
@@ -18,86 +22,333 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   List<SportActivity> _actividadesInfantiles = [];
   List<SportActivity> _actividadesAdultos = [];
   final Map<String, Map<String, dynamic>> _clasesMuestraActivas = {};
-  final String _usuarioId = '1';
   List<Map<String, dynamic>> _integrantesFamilia = [];
   bool _loadingFamilia = true;
+  bool _isLoadingClasesData = true;
 
   @override
   void initState() {
     super.initState();
-    _futureDeportivas = _loadActividadesDeportivas();
-    _loadUserData();
-    _loadClasesMuestraActivas();
+    _initializeData();
+  }
+
+  Future<void> _initializeData() async {
+    setState(() {
+      _isLoadingClasesData = true;
+    });
+    
+    try {
+      await _loadUserData();
+      _futureDeportivas = _loadActividadesDeportivas();
+      await _loadClasesMuestraActivas();
+    } catch (e) {
+      print('Error inicializando datos: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingClasesData = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadUserData() async {
+    if (!mounted) return;
     setState(() => _loadingFamilia = true);
     
     try {
       final userData = await SessionManager.getCurrentUser();
-      if (userData != null) {
+      if (userData != null && mounted) {
         await _loadIntegrantesFamilia(userData['numero_usuario'] ?? '');
-      } else {
+      } else if (mounted) {
         _setDefaultUserData();
       }
     } catch (e) {
-      _setDefaultUserData();
+      if (mounted) {
+        _setDefaultUserData();
+      }
     } finally {
-      setState(() => _loadingFamilia = false);
+      if (mounted) {
+        setState(() => _loadingFamilia = false);
+      }
     }
   }
 
   void _setDefaultUserData() {
+    if (!mounted) return;
     setState(() {
       _integrantesFamilia = [];
     });
   }
 
-  // Cargar clases muestra activas desde la base de datos
   Future<void> _loadClasesMuestraActivas() async {
     try {
       final userData = await SessionManager.getCurrentUser();
-      if (userData != null) {
-        final numeroUsuario = userData['numero_usuario'] ?? '';
-        final response = await http.post(
-          Uri.parse("https://clubfrance.org.mx/api/get_clases_muestra.php"),
-          headers: {"Content-Type": "application/json"},
-          body: jsonEncode({"numero_usuario": numeroUsuario}),
-        );
+      if (userData == null || !mounted) return;
 
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          if (data['success'] == true && data['clases_muestra'] != null) {
-            final List<dynamic> clasesData = data['clases_muestra'];
+      final numeroUsuario = userData['numero_usuario'] ?? '';
+      if (numeroUsuario.isEmpty) return;
+
+      final response = await http.post(
+        Uri.parse("https://clubfrance.org.mx/api/get_clases_muestra.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"numero_usuario": numeroUsuario}),
+      );
+
+      if (response.statusCode == 200 && mounted) {
+        final data = jsonDecode(response.body);
+        
+        if (data['success'] == true) {
+          final clasesData = data['clases_muestra'] ?? [];
+          final Map<String, Map<String, dynamic>> nuevasClases = {};
+          
+          for (var clase in clasesData) {
+            final claseMap = Map<String, dynamic>.from(clase);
+            final actividadId = claseMap['actividad_id']?.toString() ?? '';
+            if (actividadId.isNotEmpty) {
+              nuevasClases[actividadId] = {
+                'integrante': claseMap['numero_usuario_integrante']?.toString() ?? '',
+                'dia': claseMap['dia_seleccionado']?.toString(),
+                'horario': claseMap['horario_seleccionado']?.toString(),
+                'fechaAsignacion': DateTime.parse(claseMap['fecha_registro'] ?? DateTime.now().toString()),
+                'id_reserva': claseMap['id_reserva']?.toString() ?? claseMap['id']?.toString(),
+                'estado': claseMap['estado']?.toString() ?? 'asignada',
+              };
+            }
+          }
+          
+          // CARGAR TAMBIÉN CLASES TOMADAS
+          await _loadClasesTomadas(numeroUsuario, nuevasClases);
+          
+          if (mounted) {
             setState(() {
               _clasesMuestraActivas.clear();
-              for (var clase in clasesData) {
-                final claseMap = Map<String, dynamic>.from(clase);
-                final actividadId = claseMap['actividad_id']?.toString() ?? '';
-                if (actividadId.isNotEmpty) {
-                  _clasesMuestraActivas[actividadId] = {
-                    'integrante': claseMap['numero_usuario_integrante']?.toString() ?? '',
-                    'dia': claseMap['dia_seleccionado']?.toString(),
-                    'horario': claseMap['horario_seleccionado']?.toString(),
-                    'fechaAsignacion': DateTime.parse(claseMap['fecha_registro'] ?? DateTime.now().toString()),
-                    'id_reserva': claseMap['id']?.toString(),
-                  };
-                }
-              }
+              _clasesMuestraActivas.addAll(nuevasClases);
+            });
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _clasesMuestraActivas.clear();
             });
           }
         }
+      } else {
+        if (mounted) {
+          setState(() {
+            _clasesMuestraActivas.clear();
+          });
+        }
       }
     } catch (e) {
-      print('Error al cargar clases muestra: $e');
+      print('Error cargando clases muestra: $e');
+      if (mounted) {
+        setState(() {
+          _clasesMuestraActivas.clear();
+        });
+      }
+    }
+  }
+
+  Future<void> _loadClasesTomadas(String numeroUsuario, Map<String, Map<String, dynamic>> clasesMap) async {
+    try {
+      final response = await http.post(
+        Uri.parse("https://clubfrance.org.mx/api/get_clases_tomadas.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"numero_usuario": numeroUsuario}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        
+        if (data['success'] == true && data['clases_tomadas'] != null) {
+          final clasesTomadasData = data['clases_tomadas'] as Map<String, dynamic>;
+          
+          clasesTomadasData.forEach((actividadId, claseData) {
+            if (clasesMap.containsKey(actividadId)) {
+              clasesMap[actividadId]!['estado'] = 'tomada';
+            } else {
+              final claseMap = Map<String, dynamic>.from(claseData);
+              clasesMap[actividadId] = {
+                'integrante': numeroUsuario,
+                'dia': null,
+                'horario': null,
+                'fechaAsignacion': DateTime.parse(claseMap['fecha_registro'] ?? DateTime.now().toString()),
+                'id_reserva': claseMap['id_reserva']?.toString() ?? claseMap['id']?.toString(),
+                'estado': 'tomada',
+              };
+            }
+          });
+        }
+      }
+    } catch (e) {
+      print('Error cargando clases tomadas: $e');
+    }
+  }
+
+  String _getEstadoClase(String actividadId) {
+    if (_clasesMuestraActivas.containsKey(actividadId)) {
+      final estado = _clasesMuestraActivas[actividadId]!['estado']?.toString().toLowerCase() ?? 'asignada';
+      return estado;
+    }
+    return 'no_solicitada';
+  }
+
+  // NUEVOS MÉTODOS PARA MANEJAR ESTADOS
+  Color _getColorForEstado(String estado) {
+    switch (estado) {
+      case 'asignada':
+        return Colors.orange;
+      case 'tomada':
+        return Colors.green;
+      case 'cancelada':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getIconForEstado(String estado) {
+    switch (estado) {
+      case 'asignada':
+        return Icons.schedule;
+      case 'tomada':
+        return Icons.check_circle;
+      case 'cancelada':
+        return Icons.cancel;
+      default:
+        return Icons.info;
+    }
+  }
+
+  String _getTextForEstado(String estado) {
+    switch (estado) {
+      case 'asignada':
+        return "Clase muestra asignada";
+      case 'tomada':
+        return "Clase muestra completada";
+      case 'cancelada':
+        return "Clase muestra cancelada";
+      default:
+        return "Estado no disponible";
+    }
+  }
+
+  // MÉTODO PRINCIPAL PARA CONSTRUIR BOTÓN SEGÚN ESTADO
+  Widget _buildBotonPorEstado(SportActivity actividad, String estado) {
+    switch (estado) {
+      case 'asignada':
+        return _buildBotonClaseEnProceso(actividad);
+      case 'tomada':
+        return _buildBotonPagar(actividad);
+      case 'cancelada':
+      case 'no_solicitada':
+      default:
+        return _buildBotonTomarClaseMuestra(actividad);
+    }
+  }
+
+  // BOTÓN POR DEFECTO - TOMAR CLASE MUESTRA
+  Widget _buildBotonTomarClaseMuestra(SportActivity actividad) {
+    return SizedBox(
+      width: double.infinity,
+      height: 45,
+      child: ElevatedButton.icon(
+        onPressed: () => _handleClaseMuestra(actividad),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF0D47A1),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        icon: const Icon(Icons.school, size: 20),
+        label: const Text(
+          "TOMAR CLASE MUESTRA",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // BOTÓN PARA ESTADO "ASIGNADA" - CLASE MUESTRA EN PROCESO (SIN BOTÓN DE CANCELAR)
+  Widget _buildBotonClaseEnProceso(SportActivity actividad) {
+    return SizedBox(
+      width: double.infinity,
+      height: 45,
+      child: ElevatedButton.icon(
+        onPressed: () {
+          _mostrarDetallesClaseProgramada(actividad);
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.orange,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        icon: const Icon(Icons.calendar_today, size: 20),
+        label: const Text(
+          "CLASE MUESTRA EN PROCESO",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // BOTÓN PARA ESTADO "TOMADA" - PAGAR
+  Widget _buildBotonPagar(SportActivity actividad) {
+    return SizedBox(
+      width: double.infinity,
+      height: 45,
+      child: ElevatedButton.icon(
+        onPressed: () => _handlePagoActividad(actividad),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF2E7D32),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        icon: const Icon(Icons.payment, size: 20),
+        label: const Text(
+          "PAGAR ACADEMIA",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handleClaseMuestra(SportActivity actividad) {
+    final actividadId = actividad.id.toString();
+    final estadoClase = _getEstadoClase(actividadId);
+    
+    // Permitir solicitar clase muestra solo si no está asignada o está cancelada
+    if (estadoClase == 'no_solicitada' || estadoClase == 'cancelada') {
+      _mostrarFormularioClaseMuestra(actividad);
+    } else if (estadoClase == 'asignada') {
+      _mostrarInfoSnackBar('Ya tienes una clase muestra en proceso para esta actividad.');
+    } else if (estadoClase == 'tomada') {
+      _mostrarInfoSnackBar('Ya has tomado la clase muestra de esta actividad.');
     }
   }
 
   Future<void> _loadIntegrantesFamilia(String numeroUsuarioBase) async {
     if (numeroUsuarioBase.isEmpty || numeroUsuarioBase == 'No disponible') {
-      setState(() {
-        _integrantesFamilia = [];
-      });
+      if (mounted) {
+        setState(() {
+          _integrantesFamilia = [];
+        });
+      }
       return;
     }
 
@@ -108,7 +359,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         body: jsonEncode({"numero_usuario_base": numeroUsuarioBase}),
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && mounted) {
         final data = jsonDecode(response.body);
         if (data['success'] == true && data['usuarios_relacionados'] != null) {
           final List<dynamic> usuariosData = data['usuarios_relacionados'];
@@ -118,7 +369,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             if (usuario is Map) {
               final usuarioMap = Map<String, dynamic>.from(usuario);
               
-              // Extraer primer_nombre y primer_apellido directamente del mapa
               String primerNombre = usuarioMap['primer_nombre']?.toString() ?? '';
               String primerApellido = usuarioMap['primer_apellido']?.toString() ?? '';
               String nombreCompleto = _obtenerNombreCompletoDeUsuario(usuarioMap);
@@ -133,17 +383,21 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             }
           }
           
-          setState(() {
-            _integrantesFamilia = integrantes;
-          });
-        } else {
+          if (mounted) {
+            setState(() {
+              _integrantesFamilia = integrantes;
+            });
+          }
+        } else if (mounted) {
           await _loadInfoUsuarioActual(numeroUsuarioBase);
         }
-      } else {
+      } else if (mounted) {
         await _loadInfoUsuarioActual(numeroUsuarioBase);
       }
     } catch (e) {
-      await _loadInfoUsuarioActual(numeroUsuarioBase);
+      if (mounted) {
+        await _loadInfoUsuarioActual(numeroUsuarioBase);
+      }
     }
   }
 
@@ -194,12 +448,12 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   Future<void> _loadInfoUsuarioActual(String numeroUsuario) async {
     try {
       final response = await http.post(
-        Uri.parse("https://clubfrance.org.mx/api/get_usuario_info.php"), // ✅ CORREGIDO
+        Uri.parse("https://clubfrance.org.mx/api/get_usuario_info.php"),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"numero_usuario": numeroUsuario}),
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && mounted) {
         final data = jsonDecode(response.body);
         if (data['success'] == true) {
           final dataMap = Map<String, dynamic>.from(data);
@@ -217,19 +471,21 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               'rol': 'titular',
             }];
           });
-        } else {
+        } else if (mounted) {
           _setIntegrantePorDefecto(numeroUsuario);
         }
-      } else {
+      } else if (mounted) {
         _setIntegrantePorDefecto(numeroUsuario);
       }
     } catch (e) {
-      print('Error en _loadInfoUsuarioActual: $e');
-      _setIntegrantePorDefecto(numeroUsuario);
+      if (mounted) {
+        _setIntegrantePorDefecto(numeroUsuario);
+      }
     }
   }
 
   void _setIntegrantePorDefecto(String numeroUsuario) {
+    if (!mounted) return;
     setState(() {
       _integrantesFamilia = [{
         'numero_usuario': numeroUsuario,
@@ -306,29 +562,32 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     try {
       final actividades = await SportService.getActividadesDeportivas();
       
-      _actividadesInfantiles = actividades.where((a) => a.isInfantil).toList();
-      _actividadesAdultos = actividades.where((a) => a.isAdulto).toList();
+      if (mounted) {
+        setState(() {
+          _actividadesInfantiles = actividades.where((a) => a.isInfantil).toList();
+          _actividadesAdultos = actividades.where((a) => a.isAdulto).toList();
+        });
+      }
       
       return actividades;
     } catch (e) {
-      print('Error detallado en _loadActividadesDeportivas: $e');
-      throw Exception('Error al cargar actividades: $e');
+      throw Exception('Error al cargar actividades deportivas');
     }
   }
 
   void _refreshData() {
+    if (!mounted) return;
     setState(() {
-      _futureDeportivas = _loadActividadesDeportivas();
-      _loadClasesMuestraActivas();
+      _isLoadingClasesData = true;
     });
-  }
-
-  void _handleClaseMuestra(SportActivity actividad) {
-    final actividadId = actividad.id.toString();
     
-    if (!_clasesMuestraActivas.containsKey(actividadId)) {
-      _mostrarFormularioClaseMuestra(actividad);
-    }
+    _initializeData().then((_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingClasesData = false;
+        });
+      }
+    });
   }
 
   void _mostrarFormularioClaseMuestra(SportActivity actividad) {
@@ -367,7 +626,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Header
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(20),
@@ -403,7 +661,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                     ),
                   ),
 
-                  // Contenido
                   Expanded(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(20),
@@ -411,12 +668,10 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Información de la actividad
                           _buildActivityInfoCard(actividad),
 
                           const SizedBox(height: 24),
 
-                          // Selector de integrante
                           if (_loadingFamilia)
                             _buildLoadingWidget()
                           else if (_integrantesFamilia.isEmpty)
@@ -455,7 +710,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                     ),
                   ),
 
-                  // Botones
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -531,6 +785,153 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
           );
         });
       },
+    );
+  }
+
+  Future<void> _asignarClaseMuestra({
+    required SportActivity actividad,
+    required String integrante,
+    required String? diaSeleccionado,
+    required String? horarioSeleccionado,
+  }) async {
+    final actividadId = actividad.id.toString();
+    
+    try {
+      final userData = await SessionManager.getCurrentUser();
+      if (userData == null) {
+        if (mounted) {
+          _mostrarErrorSnackBar('No se pudo obtener la información del usuario');
+        }
+        return;
+      }
+
+      final numeroUsuarioBase = userData['numero_usuario'] ?? '';
+
+      final response = await http.post(
+        Uri.parse("https://clubfrance.org.mx/api/guardar_clase_muestra.php"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "numero_usuario_base": numeroUsuarioBase,
+          "numero_usuario_integrante": integrante,
+          "actividad_id": actividadId,
+          "actividad_nombre": actividad.nombreActividad,
+          "profesor": actividad.nombreProfesor,
+          "ubicacion": actividad.lugar,
+          "dia_seleccionado": diaSeleccionado,
+          "horario_seleccionado": horarioSeleccionado,
+          "fecha_registro": DateTime.now().toIso8601String(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && mounted) {
+          setState(() {
+            _clasesMuestraActivas[actividadId] = {
+              'integrante': integrante,
+              'dia': diaSeleccionado,
+              'horario': horarioSeleccionado,
+              'fechaAsignacion': DateTime.now(),
+              'id_reserva': data['id_reserva']?.toString(),
+              'estado': 'asignada',
+            };
+          });
+
+          _mostrarConfirmacionSnackBar(actividad, integrante, diaSeleccionado, horarioSeleccionado);
+        } else if (mounted) {
+          _mostrarErrorSnackBar(data['message'] ?? 'Error al guardar la clase muestra');
+        }
+      } else if (mounted) {
+        _mostrarErrorSnackBar('Error de conexión al servidor: ${response.statusCode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        _mostrarErrorSnackBar('Error al procesar la solicitud: $e');
+      }
+    }
+  }
+
+  void _mostrarConfirmacionSnackBar(
+    SportActivity actividad, 
+    String integrante, 
+    String? diaSeleccionado, 
+    String? horarioSeleccionado
+  ) {
+    if (!mounted) return;
+    
+    final integranteData = _integrantesFamilia.firstWhere(
+      (i) => i['numero_usuario'] == integrante,
+      orElse: () => {'nombre': integrante, 'rol': 'miembro'}
+    );
+
+    String mensaje = '✅ Clase muestra confirmada\n\n'
+                    '👤 Para: ${integranteData['nombre']} ($integrante)\n'
+                    '📋 Actividad: ${actividad.nombreActividad}\n'
+                    '👨‍🏫 Profesor: ${actividad.nombreProfesor}\n'
+                    '📍 Ubicación: ${actividad.lugar}\n';
+
+    if (diaSeleccionado != null) {
+      mensaje += '📅 Día: $diaSeleccionado\n';
+    }
+
+    if (horarioSeleccionado != null) {
+      mensaje += '⏰ Horario: $horarioSeleccionado';
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          mensaje,
+          style: const TextStyle(fontSize: 14),
+        ),
+        backgroundColor: const Color(0xFF2E7D32),
+        duration: const Duration(seconds: 6),
+      ),
+    );
+  }
+
+  void _mostrarDetallesClaseProgramada(SportActivity actividad) {
+    final actividadId = actividad.id.toString();
+    final infoClase = _clasesMuestraActivas[actividadId];
+    
+    if (infoClase == null) return;
+
+    String? integranteNombre = 'Usuario';
+    if (infoClase['integrante'] != null) {
+      final integrante = _integrantesFamilia.firstWhere(
+        (i) => i['numero_usuario'] == infoClase['integrante'],
+        orElse: () => {'nombre': infoClase['integrante']}
+      );
+      integranteNombre = integrante['nombre'];
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Detalles de Clase Programada'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('📋 Actividad: ${actividad.nombreActividad}'),
+            Text('👤 Integrante: $integranteNombre'),
+            Text('👨‍🏫 Profesor: ${actividad.nombreProfesor}'),
+            Text('📍 Ubicación: ${actividad.lugar}'),
+            if (infoClase['dia'] != null) 
+              Text('📅 Día: ${infoClase['dia']}'),
+            if (infoClase['horario'] != null) 
+              Text('⏰ Horario: ${infoClase['horario']}'),
+            if (infoClase['fechaAsignacion'] != null)
+              Text('🗓️ Fecha de asignación: ${DateFormat('dd/MM/yyyy').format(infoClase['fechaAsignacion'])}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -679,7 +1080,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: _getColorWithOpacity(Colors.black, 0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -705,7 +1106,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               fillColor: Colors.white,
             ),
             style: const TextStyle(fontSize: 15, color: Colors.black87),
-            value: selectedValue,
+            initialValue: selectedValue,
             selectedItemBuilder: (BuildContext context) {
               return _integrantesFamilia.map<Widget>((integrante) {
                 final numeroUsuario = integrante['numero_usuario'] as String;
@@ -741,12 +1142,10 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               final rolDisplay = _getRolDisplay(rol);
               final colorRol = _getColorRol(rol);
               
-              // Crear el texto en una sola línea: "PrimerNombre PrimerApellido - NumeroUsuario - Rol"
               String displayText = '';
               if (primerNombre.isNotEmpty && primerApellido.isNotEmpty) {
                 displayText = '$primerNombre $primerApellido - $numeroUsuario - $rolDisplay';
               } else {
-                // Fallback si no hay nombre y apellido
                 final nombreCompleto = integrante['nombre'] as String? ?? 'Usuario';
                 displayText = '$nombreCompleto - $numeroUsuario - $rolDisplay';
               }
@@ -810,7 +1209,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: _getColorWithOpacity(Colors.black, 0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -837,7 +1236,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               prefixIcon: const Icon(Icons.calendar_today, color: Color(0xFF1976D2)),
             ),
             style: const TextStyle(fontSize: 15, color: Colors.black87),
-            value: selectedValue,
+            initialValue: selectedValue,
             items: diasDisponibles.map<DropdownMenuItem<String>>((dia) {
               return DropdownMenuItem<String>(
                 value: dia,
@@ -877,7 +1276,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             borderRadius: BorderRadius.circular(8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: _getColorWithOpacity(Colors.black, 0.05),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -904,7 +1303,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
               prefixIcon: const Icon(Icons.access_time, color: Color(0xFF2E7D32)),
             ),
             style: const TextStyle(fontSize: 15, color: Colors.black87),
-            value: selectedValue,
+            initialValue: selectedValue,
             items: horariosDisponibles.map<DropdownMenuItem<String>>((horario) {
               return DropdownMenuItem<String>(
                 value: horario,
@@ -920,191 +1319,6 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         ),
       ],
     );
-  }
-
-  Future<void> _asignarClaseMuestra({
-    required SportActivity actividad,
-    required String integrante,
-    required String? diaSeleccionado,
-    required String? horarioSeleccionado,
-  }) async {
-    final actividadId = actividad.id.toString();
-    
-    try {
-      final userData = await SessionManager.getCurrentUser();
-      if (userData == null) {
-        _mostrarErrorSnackBar('No se pudo obtener la información del usuario');
-        return;
-      }
-
-      final numeroUsuarioBase = userData['numero_usuario'] ?? '';
-
-      // Guardar en la base de datos
-      final response = await http.post(
-        Uri.parse("https://clubfrance.org.mx/api/guardar_clase_muestra.php"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "numero_usuario_base": numeroUsuarioBase,
-          "numero_usuario_integrante": integrante,
-          "actividad_id": actividadId,
-          "actividad_nombre": actividad.nombreActividad,
-          "profesor": actividad.nombreProfesor,
-          "ubicacion": actividad.lugar,
-          "dia_seleccionado": diaSeleccionado,
-          "horario_seleccionado": horarioSeleccionado,
-          "fecha_registro": DateTime.now().toIso8601String(),
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true) {
-          setState(() {
-            _clasesMuestraActivas[actividadId] = {
-              'integrante': integrante,
-              'dia': diaSeleccionado,
-              'horario': horarioSeleccionado,
-              'fechaAsignacion': DateTime.now(),
-              'id_reserva': data['id_reserva']?.toString(),
-            };
-          });
-
-          _mostrarConfirmacionSnackBar(actividad, integrante, diaSeleccionado, horarioSeleccionado);
-        } else {
-          _mostrarErrorSnackBar(data['message'] ?? 'Error al guardar la clase muestra');
-        }
-      } else {
-        _mostrarErrorSnackBar('Error de conexión al servidor');
-      }
-    } catch (e) {
-      _mostrarErrorSnackBar('Error: $e');
-    }
-  }
-
-  void _mostrarConfirmacionSnackBar(
-    SportActivity actividad, 
-    String integrante, 
-    String? diaSeleccionado, 
-    String? horarioSeleccionado
-  ) {
-    final integranteData = _integrantesFamilia.firstWhere(
-      (i) => i['numero_usuario'] == integrante,
-      orElse: () => {'nombre': integrante, 'rol': 'miembro'}
-    );
-
-    String mensaje = '✅ Clase muestra confirmada\n\n'
-                    '👤 Para: ${integranteData['nombre']} ($integrante)\n'
-                    '📋 Actividad: ${actividad.nombreActividad}\n'
-                    '👨‍🏫 Profesor: ${actividad.nombreProfesor}\n'
-                    '📍 Ubicación: ${actividad.lugar}\n';
-
-    if (diaSeleccionado != null) {
-      mensaje += '📅 Día: $diaSeleccionado\n';
-    }
-
-    if (horarioSeleccionado != null) {
-      mensaje += '⏰ Horario: $horarioSeleccionado';
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          mensaje,
-          style: const TextStyle(fontSize: 14),
-        ),
-        backgroundColor: const Color(0xFF2E7D32),
-        duration: const Duration(seconds: 6),
-      ),
-    );
-  }
-
-  void _mostrarErrorSnackBar(String mensaje) {
-    // Verificar si es error de endpoint
-    if (mensaje.contains('404') || mensaje.contains('Not Found')) {
-      mensaje = 'Servicio no encontrado. Verifica los endpoints.';
-    } else if (mensaje.contains('500')) {
-      mensaje = 'Error interno del servidor.';
-    }
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '❌ $mensaje',
-          style: const TextStyle(fontSize: 14),
-        ),
-        backgroundColor: Colors.red,
-        duration: const Duration(seconds: 4),
-      ),
-    );
-  }
-
-  void _cancelarClaseMuestra(SportActivity actividad) async {
-    final actividadId = actividad.id.toString();
-    final infoClase = _clasesMuestraActivas[actividadId];
-    
-    if (infoClase == null) return;
-
-    final confirmarCancelacion = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancelar clase muestra'),
-        content: Text(
-          '¿Estás seguro de que deseas cancelar la clase muestra de "${actividad.nombreActividad}"?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('No, mantener'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
-            child: const Text('Sí, cancelar'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmarCancelacion != true) return;
-
-    try {
-      final idReserva = infoClase['id_reserva']?.toString();
-      if (idReserva == null) {
-        _mostrarErrorSnackBar('No se pudo identificar la reserva para cancelar');
-        return;
-      }
-
-      final response = await http.post(
-        Uri.parse("https://clubfrance.org.mx/api/cancelar_clase_muestra.php"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "id_reserva": idReserva,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true) {
-          setState(() {
-            _clasesMuestraActivas.remove(actividadId);
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(data['message'] ?? "Clase muestra cancelada para ${actividad.nombreActividad}"),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        } else {
-          _mostrarErrorSnackBar(data['message'] ?? "Error al cancelar la clase muestra");
-        }
-      } else {
-        _mostrarErrorSnackBar('Error de conexión al servidor');
-      }
-    } catch (e) {
-      _mostrarErrorSnackBar('Error: $e');
-    }
   }
 
   @override
@@ -1125,23 +1339,41 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
           ),
         ],
       ),
-      body: FutureBuilder<List<SportActivity>>(
-        future: _futureDeportivas,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return _buildLoadingState();
-          }
+      body: _isLoadingClasesData 
+          ? _buildLoadingClasesData()
+          : FutureBuilder<List<SportActivity>>(
+              future: _futureDeportivas,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return _buildLoadingState();
+                }
 
-          if (snapshot.hasError) {
-            return _buildErrorState(snapshot.error.toString());
-          }
+                if (snapshot.hasError) {
+                  return _buildErrorState(snapshot.error.toString());
+                }
 
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return _buildEmptyState();
-          }
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return _buildEmptyState();
+                }
 
-          return _buildContent();
-        },
+                return _buildContent();
+              },
+            ),
+    );
+  }
+
+  Widget _buildLoadingClasesData() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          const Text(
+            "Cargando información de clases...",
+            style: TextStyle(fontSize: 16),
+          ),
+        ],
       ),
     );
   }
@@ -1163,50 +1395,93 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
   }
 
   Widget _buildContent() {
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: const TabBar(
-              labelColor: Color(0xFF0D47A1),
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: Color(0xFF0D47A1),
-              labelStyle: TextStyle(
-                fontWeight: FontWeight.bold,
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.all(16),
+          child: ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const MisClasesPage()),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0D47A1),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
-              tabs: [
-                Tab(
-                  icon: Icon(Icons.child_care),
-                  text: 'INFANTILES',
-                ),
-                Tab(
-                  icon: Icon(Icons.person),
-                  text: 'ADULTOS',
-                ),
-              ],
+              elevation: 4,
+              shadowColor: Colors.blue.withOpacity(0.3),
             ),
-          ),
-          Expanded(
-            child: TabBarView(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildListaActividades(_actividadesInfantiles, Colors.blue),
-                _buildListaActividades(_actividadesAdultos, Colors.green),
+                const Icon(Icons.class_, size: 24),
+                const SizedBox(width: 12),
+                const Text(
+                  "Mis Clases",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ],
             ),
           ),
-        ],
-      ),
+        ),
+
+        Expanded(
+          child: DefaultTabController(
+            length: 2,
+            child: Column(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: _getColorWithOpacity(Colors.black, 0.1),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const TabBar(
+                    labelColor: Color(0xFF0D47A1),
+                    unselectedLabelColor: Colors.grey,
+                    indicatorColor: Color(0xFF0D47A1),
+                    labelStyle: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                    tabs: [
+                      Tab(
+                        icon: Icon(Icons.child_care),
+                        text: 'INFANTILES',
+                      ),
+                      Tab(
+                        icon: Icon(Icons.person),
+                        text: 'ADULTOS',
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _buildListaActividades(_actividadesInfantiles, Colors.blue),
+                      _buildListaActividades(_actividadesAdultos, Colors.green),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1234,8 +1509,8 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
 
   Widget _buildTarjetaActividad(SportActivity actividad, Color color) {
     final actividadId = actividad.id.toString();
-    final tieneClaseMuestra = _clasesMuestraActivas.containsKey(actividadId);
-    final infoClaseMuestra = tieneClaseMuestra ? _clasesMuestraActivas[actividadId] : null;
+    final estadoClase = _getEstadoClase(actividadId);
+    final infoClase = _clasesMuestraActivas[actividadId];
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -1260,7 +1535,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
+                    color: _getColorWithOpacity(color, 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -1290,83 +1565,56 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
             
             if (actividad.avisos.isNotEmpty) _buildAvisos(actividad),
             
-            if (tieneClaseMuestra)
+            // SECCIÓN DE ESTADO DE CLASE MUESTRA - ACTUALIZADA
+            if (estadoClase != 'no_solicitada')
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
+                  color: _getColorForEstado(estadoClase).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green),
+                  border: Border.all(
+                    color: _getColorForEstado(estadoClase),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.school, color: Colors.green, size: 20),
-                        const SizedBox(width: 8),
-                        const Text(
-                          "Clase muestra programada",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green,
-                          ),
+                        Icon(
+                          _getIconForEstado(estadoClase),
+                          color: _getColorForEstado(estadoClase),
+                          size: 20,
                         ),
-                        const Spacer(),
-                        IconButton(
-                          icon: const Icon(Icons.cancel, color: Colors.red, size: 20),
-                          onPressed: () => _cancelarClaseMuestra(actividad),
-                          tooltip: "Cancelar clase muestra",
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _getTextForEstado(estadoClase),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _getColorForEstado(estadoClase),
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    if (infoClaseMuestra != null) ...[
+                    if (estadoClase == 'asignada' && infoClase != null) ...[
                       const SizedBox(height: 8),
-                      if (infoClaseMuestra['dia'] != null)
-                        Text(
-                          '📅 Día: ${infoClaseMuestra['dia']}',
-                          style: const TextStyle(fontSize: 12, color: Colors.green),
-                        ),
-                      if (infoClaseMuestra['horario'] != null)
-                        Text(
-                          '⏰ Horario: ${infoClaseMuestra['horario']}',
-                          style: const TextStyle(fontSize: 12, color: Colors.green),
-                        ),
+                      if (infoClase['dia'] != null) 
+                        Text('📅 Próximo: ${infoClase['dia']}'),
+                      if (infoClase['horario'] != null) 
+                        Text('⏰ Horario: ${infoClase['horario']}'),
                     ],
                   ],
                 ),
               ),
             
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              height: 45,
-              child: ElevatedButton.icon(
-                onPressed: () => _handleClaseMuestra(actividad),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: tieneClaseMuestra 
-                      ? Colors.grey
-                      : const Color(0xFF0D47A1),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                icon: Icon(
-                  tieneClaseMuestra ? Icons.check_circle : Icons.school,
-                  size: 20,
-                ),
-                label: Text(
-                  tieneClaseMuestra ? "CLASE MUESTRA PROGRAMADA" : "SOLICITAR CLASE MUESTRA",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
+            
+            // BOTONES ACTUALIZADOS SEGÚN ESTADO
+            _buildBotonPorEstado(actividad, estadoClase),
           ],
         ),
       ),
@@ -1443,7 +1691,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                   fontSize: 11,
                 ),
               ),
-              backgroundColor: Colors.blue.withOpacity(0.1),
+              backgroundColor: _getColorWithOpacity(Colors.blue, 0.1),
               visualDensity: VisualDensity.compact,
             );
           }).toList(),
@@ -1474,7 +1722,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
                 fontSize: 12,
               ),
             ),
-            backgroundColor: Colors.green.withOpacity(0.1),
+            backgroundColor: _getColorWithOpacity(Colors.green, 0.1),
             visualDensity: VisualDensity.compact,
           );
         }).toList(),
@@ -1489,7 +1737,7 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.1),
+            color: _getColorWithOpacity(Colors.orange, 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -1600,7 +1848,213 @@ class _SportsActivitiesPageState extends State<SportsActivitiesPage> {
     } else if (error.contains('404')) {
       return 'El servicio no está disponible en este momento.';
     } else {
-      return 'Error: $error';
+      return 'Error al cargar las actividades deportivas';
     }
+  }
+
+  void _handlePagoActividad(SportActivity actividad) async {
+    try {
+      final userData = await SessionManager.getCurrentUser();
+      if (userData == null) {
+        _mostrarErrorSnackBar('No se pudo obtener la información del usuario');
+        return;
+      }
+
+      final numeroUsuario = userData['numero_usuario'] ?? '';
+      final nombreUsuario = userData['primer_nombre'] ?? 'Usuario';
+      final apellidoUsuario = userData['primer_apellido'] ?? '';
+
+      final precio = _obtenerPrecioActividad(actividad);
+      
+      if (precio <= 0) {
+        _mostrarErrorSnackBar('No se pudo determinar el precio de la actividad');
+        return;
+      }
+
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirmar Inscripción'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Actividad: ${actividad.nombreActividad}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text('Profesor: ${actividad.nombreProfesor}'),
+              Text('Lugar: ${actividad.lugar}'),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.attach_money, color: Colors.green),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Precio: \$$precio MXN',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('¿Deseas proceder con el pago de la inscripción?'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0D47A1),
+              ),
+              child: const Text('Continuar al Pago'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmar != true) return;
+
+      final paymentData = await PaymentService.generatePaymentData(
+        actividadNombre: actividad.nombreActividad,
+        actividadId: actividad.id.toString(),
+        numeroUsuario: numeroUsuario,
+        nombreUsuario: nombreUsuario,
+        apellidoUsuario: apellidoUsuario,
+        precio: precio,
+        concepto: 'INSCRIPCION',
+      );
+
+      if (paymentData['success'] == true && mounted) {
+        await PaymentService.savePaymentRecord(
+          referencia: paymentData['referencia'],
+          actividadId: actividad.id.toString(),
+          actividadNombre: actividad.nombreActividad,
+          numeroUsuario: numeroUsuario,
+          nombreUsuario: '$nombreUsuario $apellidoUsuario',
+          importe: precio,
+        );
+
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PaymentScreen(paymentData: paymentData),
+          ),
+        );
+
+        if (result != null && result['success'] == true && mounted) {
+          _mostrarExitoSnackBar('¡Inscripción pagada exitosamente!');
+          _refreshData();
+        } else if (result != null && result['cancelled'] == true) {
+          _mostrarInfoSnackBar('Pago cancelado');
+        } else if (mounted) {
+          _mostrarErrorSnackBar('Error en el proceso de pago');
+        }
+      } else {
+        _mostrarErrorSnackBar(paymentData['error'] ?? 'Error al generar el pago');
+      }
+    } catch (e) {
+      _mostrarErrorSnackBar('Error al procesar el pago: $e');
+    }
+  }
+
+  double _obtenerPrecioActividad(SportActivity actividad) {
+    try {
+      if (actividad.costosMensuales.isNotEmpty) {
+        for (String costo in actividad.costosMensuales) {
+          final regex = RegExp(r'(\$?\s*(\d+(?:\.\d+)?))');
+          final matches = regex.allMatches(costo);
+          
+          for (final match in matches) {
+            final priceStr = match.group(2);
+            if (priceStr != null) {
+              final price = double.tryParse(priceStr);
+              if (price != null && price > 0) {
+                return price;
+              }
+            }
+          }
+        }
+      }
+      
+      if (actividad.isInfantil) {
+        return 500.00;
+      } else {
+        return 800.00;
+      }
+    } catch (e) {
+      return 0.0;
+    }
+  }
+
+  void _mostrarExitoSnackBar(String mensaje) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '✅ $mensaje',
+          style: const TextStyle(fontSize: 14),
+        ),
+        backgroundColor: const Color(0xFF2E7D32),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _mostrarInfoSnackBar(String mensaje) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'ℹ️ $mensaje',
+          style: const TextStyle(fontSize: 14),
+        ),
+        backgroundColor: Colors.orange,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _mostrarErrorSnackBar(String mensaje) {
+    if (!mounted) return;
+    
+    if (mensaje.contains('404') || mensaje.contains('Not Found')) {
+      mensaje = 'Servicio no encontrado. Verifica los endpoints.';
+    } else if (mensaje.contains('500')) {
+      mensaje = 'Error interno del servidor.';
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '❌ $mensaje',
+          style: const TextStyle(fontSize: 14),
+        ),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  Color _getColorWithOpacity(Color color, double opacity) {
+    return color.withOpacity(opacity);
   }
 }
