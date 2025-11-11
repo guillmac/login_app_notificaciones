@@ -2,7 +2,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart'; // ✅ AGREGAR esta importación
+import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -24,16 +24,18 @@ class NotificationService {
   static Stream<Map<String, dynamic>> get notificationStream => 
       _notificationStreamController.stream;
 
-  // ✅ AGREGAR: GlobalKey para navegación global
-  static final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  static GlobalKey<NavigatorState> get navigatorKey => _navigatorKey;
+  // ✅ CORREGIDO: Usar referencia en lugar de crear nueva clave
+  static GlobalKey<NavigatorState>? _navigatorKey;
 
-  // Método principal de inicialización
-  static Future<void> initialize() async {
+  // Método principal de inicialización - ✅ MODIFICADO: Ahora recibe la clave
+  static Future<void> initialize(GlobalKey<NavigatorState> navigatorKey) async {
     try {
       if (kDebugMode) {
         print('🔄 Iniciando configuración de FCM...');
       }
+
+      // ✅ ESTABLECER la clave desde main.dart
+      _navigatorKey = navigatorKey;
 
       // 1. Configurar notificaciones locales
       await _setupLocalNotifications();
@@ -43,6 +45,7 @@ class NotificationService {
       
       if (kDebugMode) {
         print('✅ Servicio de notificaciones inicializado correctamente');
+        print('🔑 NavigatorKey configurado: ${_navigatorKey != null}');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -341,19 +344,27 @@ class NotificationService {
     _notificationStreamController.add(data);
   }
 
-  // ✅ NUEVO MÉTODO: Navegar a la página de notificaciones
+  // ✅ CORREGIDO: Navegar a la página de notificaciones con verificación segura
   static void _navigateToNotificationsPage() {
-    if (_navigatorKey.currentState != null) {
-      // Usar pushNamed para navegar a la ruta de notificaciones
-      _navigatorKey.currentState!.pushNamed('/notifications');
+    if (_navigatorKey?.currentState != null && _navigatorKey!.currentState!.mounted) {
+      // ✅ NAVEGAR A LA RUTA CORRECTA - notifications_page.dart
+      _navigatorKey!.currentState!.pushNamed('/notifications');
       
       if (kDebugMode) {
         print('🚀 Navegando a página de notificaciones desde notificación push');
       }
     } else {
       if (kDebugMode) {
-        print('❌ Navigator key no está disponible - verifica la configuración en main.dart');
+        print('❌ Navigator key no disponible, reintentando en 500ms...');
+        print('🔑 Navigator Key: $_navigatorKey');
+        print('🚀 Current State: ${_navigatorKey?.currentState}');
+        print('📱 Mounted: ${_navigatorKey?.currentState?.mounted}');
       }
+      
+      // ✅ REINTENTAR después de un delay
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _navigateToNotificationsPage();
+      });
     }
   }
 
